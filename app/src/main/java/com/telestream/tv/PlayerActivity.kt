@@ -15,6 +15,7 @@ import android.view.WindowManager
 import android.text.TextUtils
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
+import android.widget.LinearLayout
 import coil.load
 import androidx.media3.ui.DefaultTimeBar
 import android.widget.FrameLayout
@@ -65,6 +66,9 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var nextCountdown: TextView
     private lateinit var nextNow: TextView
     private lateinit var seekPreview: SeekPreview
+    private lateinit var titleBox: LinearLayout
+    private lateinit var titleMain: TextView
+    private lateinit var titleSub: TextView
 
     // left/right seeking: presses add up, and the jump happens once you stop pressing
     private var seekTarget: Long? = null
@@ -126,6 +130,11 @@ class PlayerActivity : ComponentActivity() {
     private fun open(newPath: String, newTitle: String, start: Double) {
         path = newPath
         title = newTitle
+        // "Show · עונה 1 פרק 2 · Name": the show big, the rest under it
+        val parts = newTitle.split(" · ")
+        titleMain.text = parts.first()
+        titleSub.text = parts.drop(1).joinToString(" · ")
+        titleSub.visibility = if (parts.size > 1) View.VISIBLE else View.GONE
         skips.clear(); shownSkip = null; outro = null; upcoming = null
         nextDecision = null; nextOffered = false
         hideSkip(); hideNext()
@@ -344,13 +353,16 @@ class PlayerActivity : ComponentActivity() {
     private fun cardButton(text: String, idle: Int, idleText: Int, onClick: () -> Unit) = TextView(this).apply {
         this.text = text
         gravity = Gravity.CENTER
-        setTextSize(TypedValue.COMPLEX_UNIT_PX, s(26).toFloat())
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, s(24).toFloat())
         typeface = Typeface.DEFAULT_BOLD
+        maxLines = 1
+        setPadding(0, 0, 0, 0)
         isFocusable = true; isClickable = true
         background = box(idle); setTextColor(idleText)
         setOnFocusChangeListener { _, has ->
             background = if (has) box(Color.WHITE) else box(idle)
             setTextColor(if (has) 0xFF0A0B0F.toInt() else idleText)
+            animate().scaleX(if (has) 1.08f else 1f).scaleY(if (has) 1.08f else 1f).setDuration(120).start()
         }
         setOnClickListener { onClick() }
     }
@@ -380,6 +392,10 @@ class PlayerActivity : ComponentActivity() {
         root.addView(playerView, FrameLayout.LayoutParams(-1, -1))
         // when the controls go away, give the remote back to the skip button / next card
         playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v ->
+            // what is playing, top right, while the controls are up
+            titleBox.animate().cancel()
+            if (v == View.VISIBLE) { titleBox.visibility = View.VISIBLE; titleBox.animate().alpha(1f).setDuration(200).start() }
+            else titleBox.animate().alpha(0f).setDuration(200).withEndAction { titleBox.visibility = View.GONE }.start()
             if (v != View.VISIBLE) when {
                 nextCard.visibility == View.VISIBLE -> nextNow.requestFocus()
                 skipButton.visibility == View.VISIBLE -> skipButton.requestFocus()
@@ -387,6 +403,21 @@ class PlayerActivity : ComponentActivity() {
         })
         // when the controls are up and the time bar is focused, left/right move 10 seconds (not 1/20 of the film)
         playerView.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.setKeyTimeIncrement(10_000)
+
+        // Title: top right, over a soft shade, shown with the controls
+        titleBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.RIGHT
+            setPadding(s(60), s(44), s(60), s(80))
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0xB3000000.toInt(), 0x00000000))
+            visibility = View.GONE; alpha = 0f
+        }
+        titleMain = label(44, Color.WHITE, true).apply { setShadowLayer(s(8).toFloat(), 0f, s(2).toFloat(), 0xCC000000.toInt()) }
+        titleSub = label(28, 0xFFD5D9E2.toInt()).apply { setShadowLayer(s(6).toFloat(), 0f, s(2).toFloat(), 0xCC000000.toInt()) }
+        titleBox.addView(titleMain, LinearLayout.LayoutParams(-1, -2))
+        titleBox.addView(titleSub, LinearLayout.LayoutParams(-1, -2))
+        root.addView(titleBox, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
         // Seek preview: bottom of the screen, while stepping with left/right
         seekPreview = SeekPreview(this).apply { visibility = View.GONE }
@@ -408,24 +439,24 @@ class PlayerActivity : ComponentActivity() {
         nextCard = FrameLayout(this).apply {
             visibility = View.GONE
             layoutDirection = View.LAYOUT_DIRECTION_LTR
-            background = box(0xE6101318.toInt(), 10)
+            background = box(0xF2101318.toInt(), 10)
             clipToOutline = true
         }
-        nextCard.at(View(this).apply { setBackgroundColor(0xFF3EA6FF.toInt()) }, 0, 0, 640, 4)
+        nextCard.at(View(this).apply { setBackgroundColor(Color.WHITE) }, 0, 0, 640, 4)
         nextStill = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = box(0xFF1A1D27.toInt())
             clipToOutline = true
         }
         nextCard.at(nextStill, 340, 24, 280, 158)
-        nextCard.at(label(22, 0xFF3EA6FF.toInt(), true).apply { text = "הפרק הבא" }, 20, 22, 300, 30)
+        nextCard.at(label(22, Color.WHITE, true).apply { text = "הפרק הבא" }, 20, 22, 300, 30)
         nextShow = label(30, Color.WHITE, true); nextCard.at(nextShow, 20, 50, 300, 38)
         nextEpisode = label(24, 0xFFB7BFCC.toInt()); nextCard.at(nextEpisode, 20, 88, 300, 32)
         nextCountdown = label(22, 0xFF7D8696.toInt()); nextCard.at(nextCountdown, 20, 122, 300, 30)
-        nextNow = cardButton("▶ לפרק הבא", 0xFF3EA6FF.toInt(), Color.WHITE) { nextDecision = "now"; hideNext(); playNext() }
+        nextNow = cardButton("▶ לפרק הבא", 0xE6FFFFFF.toInt(), 0xFF0A0B0F.toInt()) { nextDecision = "now"; hideNext(); playNext() }
         val cancel = cardButton("ביטול", 0x33FFFFFF, 0xFFB7BFCC.toInt()) { nextDecision = "cancel"; hideNext() }
-        nextCard.at(nextNow, 170, 172, 150, 42)
-        nextCard.at(cancel, 20, 172, 140, 42)
+        nextCard.at(nextNow, 146, 168, 174, 46)
+        nextCard.at(cancel, 20, 168, 114, 46)
         nextNow.id = View.generateViewId(); cancel.id = View.generateViewId()
         nextNow.nextFocusLeftId = cancel.id; nextNow.nextFocusRightId = cancel.id
         cancel.nextFocusLeftId = nextNow.id; cancel.nextFocusRightId = nextNow.id
