@@ -53,6 +53,10 @@ import com.telestream.tv.PlayRequest
 import com.telestream.tv.Show
 import com.telestream.tv.fileLabel
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.platform.LocalContext
+import com.telestream.tv.Actor
+import com.telestream.tv.TrailerActivity
 
 /** The big picture behind a title's page, darkened towards the text. */
 @Composable
@@ -127,7 +131,9 @@ fun MovieDetails(nav: Nav, movie: Movie) {
     }
     Box(Modifier.fillMaxSize()) {
         Backdrop(movie.fanart ?: movie.poster)
-        Row(Modifier.fillMaxSize().padding(48.dp), verticalAlignment = Alignment.CenterVertically) {
+      LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
+       item {
+        Row(Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 80.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (movie.poster != null) {
                 AsyncImage(movie.poster, null, contentScale = ContentScale.Crop,
                     modifier = Modifier.size(220.dp, 330.dp).clip(RoundedCornerShape(12.dp)))
@@ -160,10 +166,14 @@ fun MovieDetails(nav: Nav, movie: Movie) {
                             }
                         }) { Text(if (inList == true) "✓ ברשימה שלי" else "+ הרשימה שלי") }
                     }
+                    TrailerButton("movie", movie.tmdbId)
                 }
                 if (movie.files.size > 1) Text("${movie.files.size} עותקים של הסרט", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
             }
         }
+       }
+       item { CastRow("movie", movie.tmdbId) }
+      }
     }
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
     choose?.let { start ->
@@ -222,6 +232,7 @@ fun ShowScreen(nav: Nav, key: String) {
                                     }
                                 }
                             }) { Text(if (inList == true) "✓ ברשימה שלי" else "+ הרשימה שלי") }
+                            TrailerButton("tv", show.tmdbId)
                         }
                     }
                 }
@@ -247,6 +258,7 @@ fun ShowScreen(nav: Nav, key: String) {
                         }
                     }
                 }
+                item { CastRow("tv", show.tmdbId) }
             }
         }
         LaunchedEffect(Unit) { if (FocusMemory.last["show:$key"] == null) runCatching { firstFocus.requestFocus() } }
@@ -256,5 +268,48 @@ fun ShowScreen(nav: Nav, key: String) {
                 nav.play(PlayRequest(f.path, "${show.title} · עונה ${season?.number} פרק ${e.number}", start))
             }, onDismiss = { choose = null })
         }
+    }
+}
+
+/** Shown only when the server finds a trailer for this title. */
+@Composable
+fun TrailerButton(kind: String, tmdbId: Int?) {
+    if (tmdbId == null) return
+    val context = LocalContext.current
+    val state = load("trailer:$kind:$tmdbId") { Api.trailer(kind, tmdbId) ?: "" }
+    val key = state.value?.ifBlank { null } ?: return
+    OutlinedButton(onClick = { TrailerActivity.open(context, key) }) { Text("🎬  טריילר") }
+}
+
+/** The main actors, with their picture and role. */
+@Composable
+fun CastRow(kind: String, tmdbId: Int?) {
+    if (tmdbId == null) return
+    val state = load("cast:$kind:$tmdbId") { Api.cast(kind, tmdbId) }
+    val cast = state.value?.takeIf { it.isNotEmpty() } ?: return
+    Column {
+        SectionTitle("שחקנים")
+        LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(cast.size) { i -> ActorCard(cast[i]) }
+        }
+    }
+}
+
+@Composable
+fun ActorCard(actor: Actor) {
+    Column(Modifier.width(110.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            onClick = {},
+            shape = ClickableSurfaceDefaults.shape(CircleShape),
+            colors = ClickableSurfaceDefaults.colors(containerColor = Panel, focusedContainerColor = Panel),
+            border = ClickableSurfaceDefaults.border(focusedBorder = androidx.tv.material3.Border(androidx.compose.foundation.BorderStroke(3.dp, Color.White))),
+            modifier = Modifier.size(96.dp),
+        ) {
+            if (actor.photo != null) AsyncImage(actor.photo, actor.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            else Text(actor.name.take(1), fontSize = 32.sp, modifier = Modifier.align(Alignment.Center))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(actor.name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (actor.role.isNotBlank()) Text(actor.role, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

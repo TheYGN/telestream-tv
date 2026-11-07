@@ -142,8 +142,13 @@ fun SetupScreen(nav: Nav, first: Boolean) {
                     }
                 }
             }) { Text("בדוק עדכונים") }
+            // next to the button, so it is on screen while the button has focus (the TV crops the bottom edge)
+            if (updateStatus.isNotBlank()) {
+                Spacer(Modifier.width(16.dp))
+                Text(updateStatus, color = Muted, fontSize = 16.sp)
+            }
         }
-        if (updateStatus.isNotBlank()) Text(updateStatus, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+        Spacer(Modifier.height(96.dp)) // room below, so the last row scrolls clear of the screen edge
     }
     LaunchedEffect(Unit) { if (first) runCatching { focus.requestFocus() } }
 }

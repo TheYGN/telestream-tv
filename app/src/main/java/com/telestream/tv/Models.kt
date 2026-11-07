@@ -11,13 +11,16 @@ data class Progress(val position: Double, val total: Double, val done: Boolean) 
 data class Movie(
     val key: String, val title: String, val originalTitle: String, val year: Int?, val overview: String,
     val genres: List<String>, val rating: Double?, val poster: String?, val fanart: String?,
-    val files: List<MediaFile>, val progress: Progress?,
+    val files: List<MediaFile>, val progress: Progress?, val tmdbId: Int? = null,
 )
 
 data class Show(
     val key: String, val title: String, val originalTitle: String, val year: Int?, val overview: String,
     val genres: List<String>, val rating: Double?, val poster: String?, val fanart: String?, val seasonCount: Int,
+    val tmdbId: Int? = null,
 )
+
+data class Actor(val name: String, val role: String, val photo: String?)
 
 data class Episode(
     val number: Int, val name: String, val overview: String, val still: String?, val aired: String,
@@ -69,14 +72,19 @@ fun parseMovie(o: JSONObject) = Movie(
     overview = o.str("overview"), genres = o.optJSONArray("genres").strings(), rating = o.doubleOrNull("rating"),
     poster = Api.abs(o.strOrNull("poster")), fanart = Api.abs(o.strOrNull("fanart")),
     files = o.optJSONArray("files")?.mapObjects(::parseFile) ?: emptyList(),
-    progress = parseProgress(o.optJSONObject("progress")),
+    progress = parseProgress(o.optJSONObject("progress")), tmdbId = o.intId("tmdb_id"),
 )
+
+private fun JSONObject.intId(name: String): Int? = if (isNull(name)) null else opt(name)?.toString()?.toIntOrNull()
+
+fun parseActor(o: JSONObject) = Actor(o.str("name"), o.str("role"), Api.abs(o.strOrNull("photo")))
 
 fun parseShow(o: JSONObject) = Show(
     key = o.str("key"), title = o.str("title"), originalTitle = o.str("original_title"), year = o.intOrNull("year"),
     overview = o.str("overview"), genres = o.optJSONArray("genres").strings(), rating = o.doubleOrNull("rating"),
     poster = Api.abs(o.strOrNull("poster")), fanart = Api.abs(o.strOrNull("fanart")),
     seasonCount = o.optInt("season_count", o.optJSONObject("seasons")?.length() ?: 0),
+    tmdbId = o.intId("tmdb_id"),
 )
 
 fun parseShowDetail(o: JSONObject): ShowDetail {

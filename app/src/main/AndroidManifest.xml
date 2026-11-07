@@ -36,6 +36,12 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
             android:theme="@style/Theme.TeleStream.Player" />
 
+        <activity
+            android:name=".TrailerActivity"
+            android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
+            android:theme="@style/Theme.TeleStream.Player" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.updates"

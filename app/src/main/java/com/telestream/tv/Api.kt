@@ -75,6 +75,13 @@ object Api {
     suspend fun addToList(kind: String, key: String) = send("POST", "/api/tv/$tv/list", JSONObject().put("kind", kind).put("key", key))
     suspend fun removeFromList(kind: String, key: String) = send("DELETE", "/api/tv/$tv/list/$kind/${enc(key)}")
 
+    /** The YouTube id of a title's trailer, or null. kind: "movie" or "tv". */
+    suspend fun trailer(kind: String, tmdbId: Int): String? =
+        JSONObject(get("/api/trailer/$kind/$tmdbId")).let { if (it.isNull("key")) null else it.optString("key").ifBlank { null } }
+
+    suspend fun cast(kind: String, tmdbId: Int): List<Actor> =
+        JSONObject(get("/api/cast/$kind/$tmdbId")).optJSONArray("cast")?.mapObjects(::parseActor) ?: emptyList()
+
     suspend fun next(path: String) = parseNext(JSONObject(get("/api/next", mapOf("path" to path))))
     suspend fun skip(path: String) = parseSkip(JSONObject(get("/api/skip", mapOf("path" to path))))
 

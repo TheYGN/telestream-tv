@@ -12,8 +12,8 @@ android {
         applicationId = "com.telestream.tv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         // Where the app looks for a newer version: release/latest.json in this project's GitHub repository
         val updateUrl = (project.findProperty("updateUrl") as String?)
             ?: "https://raw.githubusercontent.com/TheYGN/telestream-tv/main/release/latest.json"
@@ -46,6 +46,10 @@ android {
     kotlinOptions {
         jvmTarget = "17"
         freeCompilerArgs += listOf("-opt-in=androidx.tv.material3.ExperimentalTvMaterial3Api", "-opt-in=androidx.media3.common.util.UnstableApi")
+    }
+    lint {
+        // opt-in is granted for the whole module in kotlinOptions; dispatchKeyEvent override is fine
+        disable += setOf("UnsafeOptInUsageError", "RestrictedApi")
     }
     buildFeatures { compose = true; buildConfig = true }
 }
