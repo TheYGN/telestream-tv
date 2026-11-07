@@ -18,14 +18,14 @@
 <div dir="ltr">
 
 ```
-https://github.com/TheYGN/telestream-tv/releases/latest/download/TeleStreamTV.apk
+https://raw.githubusercontent.com/TheYGN/telestream-tv/main/release/TeleStreamTV.apk
 ```
 
 </div>
 
 ## עדכונים
-בכל פתיחה האפליקציה בודקת אם יש Release חדש במאגר הזה, ומציעה להתקין אותו (אפשר גם ידנית: הגדרות ← בדוק עדכונים).
-כדי לפרסם גרסה: מעלים את `versionCode` ו-`versionName` ב-`app/build.gradle.kts`, בונים, ויוצרים Release בשם `vX.Y.Z` עם הקובץ `TeleStreamTV.apk`.
+בכל פתיחה האפליקציה קוראת את `release/latest.json` מהמאגר הזה, ואם יש גרסה חדשה היא מציעה להתקין אותה (אפשר גם ידנית: הגדרות ← בדוק עדכונים).
+כדי לפרסם גרסה: מעלים את `versionCode` ו-`versionName` ב-`app/build.gradle.kts`, בונים, מחליפים את `release/TeleStreamTV.apk` ומעדכנים את `version` ו-`notes` ב-`release/latest.json`.
 
 מפתח החתימה (`app/telestream.keystore`) לא נמצא במאגר. הוא שמור בתיקיית הפרויקט, ובלעדיו גרסה חדשה לא תותקן מעל הישנה.
 

@@ -8,3 +8,4 @@ local.properties
 .kotlin/
 screenshots/
 *.apk
+!release/*.apk

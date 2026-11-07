@@ -16,7 +16,8 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * Updates from the GitHub releases of TheYGN/telestream-tv: each release carries the APK as an asset.
+ * Updates from the TheYGN/telestream-tv repository: release/latest.json names the newest version and its APK
+ * (a GitHub release answer, with tag_name and assets, is understood too).
  * Android doesn't let an app outside a store update itself silently, so the viewer confirms the install.
  */
 object Updater {
@@ -36,12 +37,13 @@ object Updater {
             resp.body?.string() ?: ""
         }
         val o = JSONObject(body)
-        val version = o.optString("tag_name").removePrefix("v")
+        val version = o.optString("version").ifBlank { o.optString("tag_name") }.removePrefix("v")
         val assets = o.optJSONArray("assets")
-        val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
+        val apk = o.optString("apk").ifBlank { null } ?: (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
             .firstOrNull { it.optString("name").endsWith(".apk") }?.optString("browser_download_url")
+        val notes = o.optString("notes").ifBlank { o.optString("body") }.trim()
         if (apk.isNullOrBlank() || !isNewer(version, BuildConfig.VERSION_NAME)) null
-        else Release(version, o.optString("body").trim(), apk)
+        else Release(version, notes, apk)
     }
 
     /** "1.10.0" > "1.9.2": compares number by number. */

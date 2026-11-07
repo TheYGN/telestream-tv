@@ -14,9 +14,9 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "0.2.0"
-        // Where the app looks for a newer version: the latest GitHub release of this project
+        // Where the app looks for a newer version: release/latest.json in this project's GitHub repository
         val updateUrl = (project.findProperty("updateUrl") as String?)
-            ?: "https://api.github.com/repos/TheYGN/telestream-tv/releases/latest"
+            ?: "https://raw.githubusercontent.com/TheYGN/telestream-tv/main/release/latest.json"
         buildConfigField("String", "UPDATE_URL", "\"$updateUrl\"")
     }
 
