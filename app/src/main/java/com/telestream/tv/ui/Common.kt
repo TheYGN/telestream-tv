@@ -214,6 +214,8 @@ fun hebrewDate(iso: String?): String? {
 /** Like the web page: "שודר לראשונה ב-…", or "ישודר ב-…" for a date still ahead. */
 fun airedText(iso: String?): String? {
     val date = hebrewDate(iso) ?: return null
-    val future = runCatching { java.time.LocalDate.parse(iso!!.trim().take(10)).isAfter(java.time.LocalDate.now()) }.getOrDefault(false)
+    // ISO dates compare as text; java.time needs Android 8, and some streamers are older
+    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+    val future = iso!!.trim().take(10) > today
     return (if (future) "ישודר ב-" else "שודר לראשונה ב-") + date
 }
