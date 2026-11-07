@@ -33,6 +33,8 @@ import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.telestream.tv.Prefs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -63,9 +65,17 @@ fun HomeTab(nav: Nav) {
     Loading(state) { data ->
         val genreRails = data.movieGenres.map { g -> Rail(g, AppScreen.Browse("movies", g)) { Api.movies(size = 24, genre = g).items } } +
             data.showGenres.map { g -> Rail("סדרות · $g", AppScreen.Browse("shows", g, title = "סדרות · $g")) { Api.shows(size = 24, genre = g).items } }
-        LazyColumn(contentPadding = PaddingValues(bottom = 48.dp)) {
+        val listState = rememberLazyListState()
+        val scope = rememberCoroutineScope()
+        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 48.dp)) {
             val picks = data.movies.filter { it.fanart != null && it.overview.isNotBlank() }.take(6)
-            if (picks.isNotEmpty()) item(key = "hero") { HeroBanner(nav, picks) }
+            if (picks.isNotEmpty()) item(key = "hero") {
+                // coming back up to the banner: show all of it, not just its buttons
+                HeroBanner(nav, picks) {
+                    // after the focus has scrolled the buttons into view, go all the way up
+                    scope.launch { delay(120); listState.animateScrollToItem(0) }
+                }
+            }
             val upcoming = soon.value.orEmpty()
             if (upcoming.isNotEmpty()) {
                 item { SectionTitle("בקרוב ברשת") }
@@ -130,14 +140,14 @@ private fun LazyRail(nav: Nav, rail: Rail) {
 
 /** The big rotating picture at the top of home: recently added movies, like the web library page. */
 @Composable
-fun HeroBanner(nav: Nav, picks: List<Movie>) {
+fun HeroBanner(nav: Nav, picks: List<Movie>, onFocused: () -> Unit = {}) {
     var index by rememberSaveable { mutableIntStateOf(0) }
     var focused by remember { mutableStateOf(false) }
     val movie = picks[index % picks.size]
     LaunchedEffect(index, focused) {
         if (!focused) { delay(8000); index = (index + 1) % picks.size }
     }
-    Box(Modifier.fillMaxWidth().height(380.dp).onFocusChanged { focused = it.hasFocus }) {
+    Box(Modifier.fillMaxWidth().height(380.dp).onFocusChanged { if (it.hasFocus && !focused) onFocused(); focused = it.hasFocus }) {
         Crossfade(targetState = movie.fanart, animationSpec = tween(900), label = "hero") { img ->
             AsyncImage(model = img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
