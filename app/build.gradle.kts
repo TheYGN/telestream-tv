@@ -12,8 +12,8 @@ android {
         applicationId = "com.telestream.tv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.4.2"
+        versionCode = 7
+        versionName = "0.4.3"
         // Where the app looks for a newer version: release/latest.json in this project's GitHub repository
         val updateUrl = (project.findProperty("updateUrl") as String?)
             ?: "https://raw.githubusercontent.com/TheYGN/telestream-tv/main/release/latest.json"

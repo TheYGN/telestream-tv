@@ -27,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -205,6 +206,7 @@ fun ShowScreen(nav: Nav, key: String) {
         val resume = season?.episodes?.firstOrNull { it.progress?.let { p -> !p.done && p.position > 30 } == true }
             ?: season?.episodes?.firstOrNull { it.progress?.done != true }
         val firstFocus = remember { FocusRequester() }
+        var focusedEpisode by remember { mutableStateOf<Episode?>(null) }
 
         Box(Modifier.fillMaxSize()) {
             Backdrop(show.fanart ?: show.poster)
@@ -247,16 +249,22 @@ fun ShowScreen(nav: Nav, key: String) {
                     CardRow(season.episodes, key = { "${season.number}:${it.number}" }) { e ->
                         WideCard(
                             title = "${e.number}. " + e.name.ifBlank { "פרק ${e.number}" },
-                            subtitle = e.overview.ifBlank { e.aired },
+                            subtitle = hebrewDate(e.aired) ?: e.overview,
                             image = e.still ?: season.poster ?: show.fanart,
                             progress = e.progress?.takeIf { !it.done }?.fraction ?: 0f,
                             tag = if (e.progress?.done == true) "✓ נצפה" else "",
-                            modifier = Modifier.restoreFocus("show:$key", "e:${season.number}:${e.number}"),
+                            modifier = Modifier.restoreFocus("show:$key", "e:${season.number}:${e.number}")
+                                .onFocusChanged { if (it.isFocused) focusedEpisode = e },
                         ) {
                             val p = e.progress
                             play(e, if (p != null && !p.done) p.position else 0.0)
                         }
                     }
+                }
+                // the episode in focus: its name, when it first aired, length and full summary
+                if (season != null) item {
+                    val e = focusedEpisode?.takeIf { f -> season.episodes.any { it === f } } ?: resume ?: season.episodes.firstOrNull()
+                    if (e != null) EpisodeInfo(season.number, e)
                 }
                 item { CastRow("tv", show.tmdbId) }
             }
@@ -311,5 +319,18 @@ fun ActorCard(actor: Actor) {
         Spacer(Modifier.height(6.dp))
         Text(actor.name, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (actor.role.isNotBlank()) Text(actor.role, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+fun EpisodeInfo(season: Int, e: Episode) {
+    Column(Modifier.padding(start = 48.dp, end = 48.dp, top = 14.dp).fillMaxWidth(0.7f)) {
+        Text(e.name.ifBlank { "פרק ${e.number}" }, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        val runtime = e.files.firstOrNull()?.duration?.takeIf { it > 0 }?.let { "${(it / 60).toInt()} דק׳" }
+        Text(listOfNotNull("עונה $season · פרק ${e.number}", airedText(e.aired), runtime).joinToString("   ·   "), color = Muted, fontSize = 15.sp)
+        if (e.overview.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(e.overview, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 21.sp)
+        }
     }
 }

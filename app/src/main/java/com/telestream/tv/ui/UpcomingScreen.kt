@@ -18,15 +18,6 @@ import coil.compose.AsyncImage
 import com.telestream.tv.Api
 import com.telestream.tv.Upcoming
 
-private val months = listOf("בינואר", "בפברואר", "במרץ", "באפריל", "במאי", "ביוני", "ביולי", "באוגוסט", "בספטמבר", "באוקטובר", "בנובמבר", "בדצמבר")
-
-/** "2026-11-20" → "20 בנובמבר 2026" */
-private fun longDate(iso: String?): String? {
-    val p = iso?.take(10)?.split("-")?.takeIf { it.size == 3 } ?: return null
-    val m = p[1].toIntOrNull()?.takeIf { it in 1..12 } ?: return iso
-    return "${p[2].trimStart('0')} ${months[m - 1]} ${p[0]}"
-}
-
 /** A title that hasn't arrived yet: when it is expected, the trailer and the cast. */
 @Composable
 fun UpcomingScreen(nav: Nav, key: String) {
@@ -61,7 +52,7 @@ private fun UpcomingDetails(u: Upcoming) {
                             listOf("דיגיטלי" to u.digital, "בלו-ריי" to u.bluray, "בקולנוע" to u.cinema).forEach { (label, date) ->
                                 Column(Modifier.background(Panel, RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp)) {
                                     Text(label, color = Muted, fontSize = 13.sp)
-                                    Text(longDate(date) ?: "עוד לא ידוע", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(hebrewDate(date) ?: "עוד לא ידוע", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }

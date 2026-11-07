@@ -201,3 +201,19 @@ fun leaveOrType(
         else -> false
     }
 }
+
+private val hebrewMonths = listOf("בינואר", "בפברואר", "במרץ", "באפריל", "במאי", "ביוני", "ביולי", "באוגוסט", "בספטמבר", "באוקטובר", "בנובמבר", "בדצמבר")
+
+/** "2021-03-12" → "12 במרץ 2021"; null when there is no usable date. */
+fun hebrewDate(iso: String?): String? {
+    val p = iso?.trim()?.take(10)?.split("-")?.takeIf { it.size == 3 } ?: return null
+    val m = p[1].toIntOrNull()?.takeIf { it in 1..12 } ?: return null
+    return "${p[2].trimStart('0')} ${hebrewMonths[m - 1]} ${p[0]}"
+}
+
+/** Like the web page: "שודר לראשונה ב-…", or "ישודר ב-…" for a date still ahead. */
+fun airedText(iso: String?): String? {
+    val date = hebrewDate(iso) ?: return null
+    val future = runCatching { java.time.LocalDate.parse(iso!!.trim().take(10)).isAfter(java.time.LocalDate.now()) }.getOrDefault(false)
+    return (if (future) "ישודר ב-" else "שודר לראשונה ב-") + date
+}
