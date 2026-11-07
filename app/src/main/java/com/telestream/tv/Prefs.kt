@@ -36,5 +36,10 @@ object Prefs {
         get() = sp.getInt("skip_mode", 0)
         set(value) = sp.edit().putInt("skip_mode", value).apply()
 
+    /** Opening animation: 0 = with sound, 1 = silent, 2 = off. */
+    var introMode: Int
+        get() = sp.getInt("intro_mode", 0)
+        set(value) = sp.edit().putInt("intro_mode", value).apply()
+
     val isSetUp: Boolean get() = tvName.isNotBlank()
 }

@@ -1,5 +1,7 @@
 package com.telestream.tv.ui
 
+import kotlinx.coroutines.flow.first
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -79,6 +81,7 @@ fun SetupScreen(nav: Nav, first: Boolean) {
     var name by remember { mutableStateOf(Prefs.tvName) }
     var lead by remember { mutableStateOf(Prefs.nextLead) }
     var skipMode by remember { mutableStateOf(Prefs.skipMode) }
+    var introMode by remember { mutableStateOf(Prefs.introMode) }
     var status by remember { mutableStateOf("") }
     var updateStatus by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -90,6 +93,7 @@ fun SetupScreen(nav: Nav, first: Boolean) {
         Prefs.tvName = name
         Prefs.nextLead = lead
         Prefs.skipMode = skipMode
+        Prefs.introMode = introMode
         Cache.values.clear()
         status = "בודק חיבור לשרת…"
         scope.launch {
@@ -121,6 +125,13 @@ fun SetupScreen(nav: Nav, first: Boolean) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
             listOf("להציג כפתור", "לדלג אוטומטית", "לא לדלג").forEachIndexed { i, label ->
                 FilterChip(selected = skipMode == i, onClick = { skipMode = i }) { Text(label) }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("אנימציית פתיחה", color = Muted, fontSize = 15.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+            listOf("עם צליל", "בלי צליל", "כבויה").forEachIndexed { i, label ->
+                FilterChip(selected = introMode == i, onClick = { introMode = i }) { Text(label) }
             }
         }
         Spacer(Modifier.height(20.dp))
@@ -156,5 +167,9 @@ fun SetupScreen(nav: Nav, first: Boolean) {
         }
         Spacer(Modifier.height(96.dp)) // room below, so the last row scrolls clear of the screen edge
     }
-    LaunchedEffect(Unit) { if (first) runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) {
+        if (!first) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow { IntroGate.done }.first { it } // keyboard only after the opening animation
+        runCatching { focus.requestFocus() }
+    }
 }
