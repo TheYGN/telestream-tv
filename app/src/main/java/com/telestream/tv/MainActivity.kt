@@ -36,25 +36,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        listenForPlays()
         lifecycleScope.launch { UpdateOffer.checkOnStart() }
-    }
-
-    /** Like the Kodi add-on: tell the server this TV exists, and play what the library page sends here. */
-    private fun listenForPlays() = lifecycleScope.launch {
-        repeatOnLifecycle(Lifecycle.State.STARTED) {
-            var announced: Pair<String, String>? = null
-            while (true) {
-                if (!Prefs.isSetUp) { delay(3000); continue }
-                try {
-                    val me = Prefs.server to Prefs.tvName
-                    if (announced != me) { Api.hello(); announced = me }
-                    Api.waitForPlay(20)?.let { PlayerActivity.start(this@MainActivity, it) }
-                } catch (e: Exception) {
-                    if (e.message?.contains("404") == true) announced = null // the server forgot this TV
-                    delay(10_000)
-                }
-            }
-        }
     }
 }

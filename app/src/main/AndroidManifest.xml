@@ -33,6 +33,7 @@
         <activity
             android:name=".PlayerActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout"
             android:theme="@style/Theme.TeleStream.Player" />
 
