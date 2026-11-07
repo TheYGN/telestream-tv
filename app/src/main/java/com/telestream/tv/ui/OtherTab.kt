@@ -23,10 +23,16 @@ import com.telestream.tv.PlayRequest
 
 /** Files the server couldn't match to a movie or show, by name. */
 @Composable
-fun OtherTab(nav: Nav) {
-    val state = load("other") { Api.other().items }
-    Loading(state) { files ->
+fun OtherScreen(nav: Nav) {
+    val state = load("other") { Api.other(size = 100) }
+    Loading(state) { page ->
+        val files = page.items
         LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 48.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            item {
+                Text("קבצים נוספים · ${page.total}", fontSize = 24.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    modifier = Modifier.padding(start = 48.dp, top = 24.dp, bottom = 4.dp))
+                Text("קבצים שהשרת לא זיהה כסרט או כסדרה", color = Muted, fontSize = 15.sp, modifier = Modifier.padding(start = 48.dp, bottom = 8.dp))
+            }
             items(files, key = { it.path }) { FileRow(nav, it) }
         }
     }

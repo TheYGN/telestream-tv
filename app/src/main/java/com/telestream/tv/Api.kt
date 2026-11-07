@@ -76,6 +76,12 @@ object Api {
     suspend fun removeFromList(kind: String, key: String) = send("DELETE", "/api/tv/$tv/list/$kind/${enc(key)}")
 
     /** The YouTube id of a title's trailer, or null. kind: "movie" or "tv". */
+    suspend fun upcoming(): List<Upcoming> =
+        JSONObject(get("/api/upcoming")).optJSONArray("items")?.mapObjects(::parseUpcoming) ?: emptyList()
+
+    suspend fun other(page: Int = 1, q: String? = null, size: Int) =
+        parsePage(JSONObject(get("/api/other", mapOf("page" to "$page", "q" to q, "size" to "$size"))), ::parseFile)
+
     suspend fun trailer(kind: String, tmdbId: Int): String? =
         JSONObject(get("/api/trailer/$kind/$tmdbId")).let { if (it.isNull("key")) null else it.optString("key").ifBlank { null } }
 

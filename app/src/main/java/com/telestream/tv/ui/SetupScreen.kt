@@ -126,6 +126,12 @@ fun SetupScreen(nav: Nav, first: Boolean) {
         Spacer(Modifier.height(20.dp))
         Button(onClick = ::save) { Text(if (first) "התחל" else "שמור") }
         if (status.isNotBlank()) Text(status, modifier = Modifier.padding(top = 12.dp), fontSize = 16.sp)
+        if (!first) {
+            Spacer(Modifier.height(24.dp))
+            Text("עוד", color = Muted, fontSize = 15.sp)
+            Spacer(Modifier.height(8.dp))
+            androidx.tv.material3.OutlinedButton(onClick = { nav.open(AppScreen.Other) }) { Text("קבצים נוספים (שלא זוהו)") }
+        }
         Spacer(Modifier.height(24.dp))
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text("גרסה ${BuildConfig.VERSION_NAME}", color = Muted, fontSize = 15.sp)

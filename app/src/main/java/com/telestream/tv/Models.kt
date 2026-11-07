@@ -142,3 +142,35 @@ fun parseNext(o: JSONObject): NextEpisode? = o.optString("path").takeIf { it.isN
 
 fun fileLabel(f: MediaFile): String =
     "${f.name}  (${"%.1f".format(f.size / 1024.0 / 1024 / 1024)} GB · ${f.group})"
+
+/** A title the server is waiting for ("בקרוב ברשת"); [movie] is set once it has arrived in the library. */
+data class Upcoming(
+    val key: String, val status: String, val kind: String, val tmdbId: Int?, val title: String, val originalTitle: String,
+    val year: Int?, val poster: String?, val fanart: String?, val overview: String, val genres: List<String>, val rating: Double?,
+    val digital: String?, val bluray: String?, val cinema: String?, val days: Int?, val movie: Movie?,
+) {
+    /** The same wording as the web library page. */
+    val whenText: String get() = when {
+        status == "arrived" -> "הגיע לספרייה ✓"
+        status == "out" -> "יצא לרשת"
+        status == "waiting" -> cinema?.let { "בקולנוע מ-${dayMonth(it)}" } ?: "תאריך עוד לא ידוע"
+        days == 0 -> "יוצא היום"
+        days == 1 -> "יוצא מחר"
+        days != null && days <= 30 -> "עוד $days ימים"
+        else -> digital?.let { "צפוי ב-${dayMonth(it)}" } ?: "תאריך עוד לא ידוע"
+    }
+}
+
+/** "2026-11-20" → "20.11" */
+fun dayMonth(iso: String): String = iso.take(10).split("-").let { if (it.size == 3) "${it[2].trimStart('0')}.${it[1].trimStart('0')}" else iso }
+
+fun parseUpcoming(o: JSONObject) = Upcoming(
+    key = o.optString("key"), status = o.optString("status"), kind = o.optString("kind", "movie").ifBlank { "movie" },
+    tmdbId = o.intId("tmdb_id"), title = o.optString("title"), originalTitle = if (o.isNull("original_title")) "" else o.optString("original_title"),
+    year = o.intOrNull("year"), poster = Api.abs(o.strOrNull("poster")), fanart = Api.abs(o.strOrNull("fanart")),
+    overview = if (o.isNull("overview")) "" else o.optString("overview"),
+    genres = o.optJSONArray("genres")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
+    rating = o.doubleOrNull("rating"), digital = o.strOrNull("digital"), bluray = o.strOrNull("bluray"), cinema = o.strOrNull("cinema"),
+    days = if (o.isNull("days")) null else o.optInt("days"),
+    movie = o.optJSONObject("movie")?.let(::parseMovie),
+)

@@ -30,9 +30,9 @@ import com.telestream.tv.Api
 
 /** All movies or all shows, newest first, a page at a time; with the genre chips on top in the main tabs. */
 @Composable
-fun BrowseScreen(nav: Nav, kind: String, initialGenre: String?, showGenres: Boolean) {
+fun BrowseScreen(nav: Nav, kind: String, initialGenre: String?, showGenres: Boolean, initialSort: String? = null, title: String? = null) {
     var genre by rememberSaveable(kind) { mutableStateOf(initialGenre) }
-    var sort by rememberSaveable(kind) { mutableStateOf<String?>(null) }
+    var sort by rememberSaveable(kind) { mutableStateOf(initialSort) }
     val home = load("homeinfo") { Api.home() }
     Column(Modifier.fillMaxSize()) {
         if (showGenres) {
@@ -42,8 +42,8 @@ fun BrowseScreen(nav: Nav, kind: String, initialGenre: String?, showGenres: Bool
                 item { FilterChip(selected = sort == "rating", onClick = { sort = if (sort == "rating") null else "rating" }) { Text("דירוג") } }
                 items(genres) { g -> FilterChip(selected = genre == g, onClick = { genre = if (genre == g) null else g }) { Text(g) } }
             }
-        } else if (initialGenre != null) {
-            Text(initialGenre, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, top = 24.dp, bottom = 8.dp))
+        } else if (title != null || initialGenre != null) {
+            Text(title ?: initialGenre ?: "", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, top = 24.dp, bottom = 8.dp))
         }
         PagedGrid(nav, kind, genre, sort, q = null, screen = "browse:$kind:$genre:$sort")
     }

@@ -40,10 +40,12 @@ sealed class AppScreen {
     data class Setup(val first: Boolean) : AppScreen()
     data class MovieDetails(val key: String, val title: String) : AppScreen()
     data class ShowDetails(val key: String) : AppScreen()
-    data class Browse(val kind: String, val genre: String?) : AppScreen()
+    data class Browse(val kind: String, val genre: String?, val sort: String? = null, val title: String? = null) : AppScreen()
+    data object Other : AppScreen()
+    data class Upcoming(val key: String) : AppScreen()
 }
 
-enum class Tab(val label: String) { Home("בית"), Movies("סרטים"), Shows("סדרות"), Search("חיפוש"), Other("קבצים נוספים"), Settings("הגדרות") }
+enum class Tab(val label: String) { Home("בית"), Movies("סרטים"), Shows("סדרות"), Search("חיפוש"), Settings("הגדרות") }
 
 /** What every screen gets: open another screen, or play something. */
 class Nav(val open: (AppScreen) -> Unit, val replace: (AppScreen) -> Unit, val play: (PlayRequest) -> Unit)
@@ -61,7 +63,9 @@ fun Root(screen: AppScreen, open: (AppScreen) -> Unit, replace: (AppScreen) -> U
                 is AppScreen.Setup -> SetupScreen(nav, screen.first)
                 is AppScreen.MovieDetails -> MovieScreen(nav, screen.key, screen.title)
                 is AppScreen.ShowDetails -> ShowScreen(nav, screen.key)
-                is AppScreen.Browse -> BrowseScreen(nav, screen.kind, screen.genre, showGenres = false)
+                is AppScreen.Browse -> BrowseScreen(nav, screen.kind, screen.genre, showGenres = false, initialSort = screen.sort, title = screen.title)
+                AppScreen.Other -> OtherScreen(nav)
+                is AppScreen.Upcoming -> UpcomingScreen(nav, screen.key)
             }
         }
       }
@@ -94,6 +98,12 @@ fun MainScreen(nav: Nav) {
                     }
                 }
             }
+            Spacer(Modifier.weight(1f))
+            // which TV this is (its name from the settings), like the web page's "המשך צפייה · סלון"
+            if (com.telestream.tv.Prefs.tvName.isNotBlank()) {
+                Text("📺  " + com.telestream.tv.Prefs.tvName, fontSize = 15.sp, color = Muted,
+                    modifier = Modifier.background(Color(0x1FFFFFFF), RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 6.dp))
+            }
         }
         Box(Modifier.fillMaxSize()) {
             when (tab) {
@@ -101,7 +111,6 @@ fun MainScreen(nav: Nav) {
                 Tab.Movies -> BrowseScreen(nav, "movies", null, showGenres = true)
                 Tab.Shows -> BrowseScreen(nav, "shows", null, showGenres = true)
                 Tab.Search -> SearchTab(nav)
-                Tab.Other -> OtherTab(nav)
                 Tab.Settings -> SetupScreen(nav, first = false)
             }
         }
