@@ -47,7 +47,7 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         private const val REPORT_EVERY_MS = 10_000L
         private const val SKIP_SHOWN_MS = 30_000L
-        private const val PAUSE_INFO_AFTER_MS = 5_000L
+        private const val PAUSE_INFO_AFTER_MS = 4_000L
 
         fun start(context: Context, request: PlayRequest) {
             context.startActivity(Intent(context, PlayerActivity::class.java)
@@ -123,6 +123,29 @@ class PlayerActivity : ComponentActivity() {
         pauseBox.animate().cancel()
         pauseBox.alpha = 0f
         pauseBox.visibility = View.GONE
+    }
+
+    /**
+     * Finds what [r] is by its file: an episode of the show (its key comes with the request, or with the next episode),
+     * else a movie with that file. Returns ("עונה 1 · פרק 2 · Name", summary); the show's summary when the episode has none.
+     */
+    private suspend fun describe(r: PlayRequest, nextKey: String?): Pair<String, String>? {
+        // the same file whatever its name: /stream/<chat>/<message>/...
+        fun same(other: String) = other.split("/").take(4) == r.path.split("/").take(4)
+        val showKey = r.key?.takeIf { r.kind == "show" || r.kind == "tv" } ?: nextKey?.ifBlank { null }
+        if (showKey != null) {
+            val detail = Api.show(showKey)
+            for (season in detail.seasons) for (e in season.episodes) if (e.files.any { same(it.path) }) {
+                val line = "עונה ${season.number} · פרק ${e.number}" + if (e.name.isNotBlank()) " · ${e.name}" else ""
+                return line to e.overview.ifBlank { detail.show.overview }
+            }
+        }
+        val name = r.title.substringBefore(" · ").trim()
+        if (name.isNotBlank()) {
+            Api.movies(q = name, size = 30).items.firstOrNull { m -> m.files.any { same(it.path) } || m.key == r.key }
+                ?.let { return "" to it.overview }
+        }
+        return null
     }
 
     private fun showPauseTexts(r: PlayRequest) {
@@ -223,17 +246,16 @@ class PlayerActivity : ComponentActivity() {
             }
             upcoming = runCatching { Api.next(path) }.getOrNull()
             refreshButtons()
-            // the summary for the pause screen, when the caller didn't pass it
-            if (request.overview.isNullOrBlank() && !request.key.isNullOrBlank()) {
+            // the summary for the pause screen, when the caller didn't pass it (continue watching, sent from the phone, next episode)
+            if (request.overview.isNullOrBlank()) {
                 val p = path
-                val found = when (request.kind) {
-                    "show", "tv" -> runCatching { Api.show(request.key) }.getOrNull()?.seasons?.flatMap { it.episodes }
-                        ?.firstOrNull { e -> e.files.any { it.path == p } }?.overview
-                    "movie" -> runCatching { Api.movies(q = request.title.substringBefore(" · "), size = 20).items }.getOrNull()
-                        ?.firstOrNull { it.key == request.key }?.overview
-                    else -> null
+                val about = runCatching { describe(request, upcoming?.key) }.getOrNull()
+                if (p == path && about != null) {
+                    if (about.first.isNotBlank() && pauseEpisode.visibility != View.VISIBLE) {
+                        pauseEpisode.text = about.first; pauseEpisode.visibility = View.VISIBLE
+                    }
+                    if (about.second.isNotBlank()) { pauseOverview.text = about.second; pauseOverview.visibility = View.VISIBLE }
                 }
-                if (p == path && !found.isNullOrBlank()) { pauseOverview.text = found; pauseOverview.visibility = View.VISIBLE }
             }
         }
         watcher?.cancel()
