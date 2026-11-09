@@ -38,11 +38,15 @@ data class ContinueItem(
 
 data class Page<T>(val items: List<T>, val page: Int, val pages: Int, val total: Int)
 data class Home(val movies: Int, val shows: Int, val other: Int, val movieGenres: List<String>, val showGenres: List<String>)
-data class NextEpisode(val path: String, val show: String, val season: Int, val episode: Int, val name: String, val still: String?, val poster: String?)
+data class NextEpisode(val path: String, val key: String = "", val show: String, val season: Int, val episode: Int, val name: String, val still: String?, val poster: String?)
 data class SkipTimes(val intro: Pair<Double, Double>?, val recap: Pair<Double, Double>?, val outro: Double?)
 
 /** Something to play: a file on the server, what to call it, and where to start (seconds). */
-data class PlayRequest(val path: String, val title: String, val start: Double = 0.0)
+data class PlayRequest(
+    val path: String, val title: String, val start: Double = 0.0,
+    /** What it is ("movie"/"show" + its key) and its summary, for the "you're watching" screen when paused. */
+    val kind: String? = null, val key: String? = null, val overview: String? = null,
+)
 
 // ---------- parsing ----------
 
@@ -134,7 +138,7 @@ fun parseSkip(o: JSONObject) = SkipTimes(
 
 fun parseNext(o: JSONObject): NextEpisode? = o.optString("path").takeIf { it.isNotBlank() }?.let {
     NextEpisode(
-        path = it, show = o.optString("show"), season = o.optInt("season"), episode = o.optInt("episode"),
+        path = it, key = o.optString("key"), show = o.optString("show"), season = o.optInt("season"), episode = o.optInt("episode"),
         name = if (o.isNull("name")) "" else o.optString("name"), still = Api.abs(o.optString("still").ifBlank { null }),
         poster = Api.abs(o.optString("poster").ifBlank { null }),
     )

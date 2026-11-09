@@ -47,10 +47,12 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         private const val REPORT_EVERY_MS = 10_000L
         private const val SKIP_SHOWN_MS = 30_000L
+        private const val PAUSE_INFO_AFTER_MS = 5_000L
 
         fun start(context: Context, request: PlayRequest) {
             context.startActivity(Intent(context, PlayerActivity::class.java)
                 .putExtra("path", request.path).putExtra("title", request.title).putExtra("start", request.start)
+                .putExtra("kind", request.kind).putExtra("key", request.key).putExtra("overview", request.overview)
                 .addFlags(if (context is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
@@ -81,6 +83,57 @@ class PlayerActivity : ComponentActivity() {
     private val hideSeek = Runnable { seekPreview.visibility = View.GONE; seekPreview.frame = null }
     private val frames = FrameGrabber { bmp -> if (seekTarget != null) seekPreview.frame = bmp }
 
+    /** What the on-screen controls drive: the player, plus a working ⏭ that plays the next episode. */
+    private val controls: Player by lazy {
+        object : androidx.media3.common.ForwardingPlayer(player) {
+            private fun nextCommand(c: Int) = c == Player.COMMAND_SEEK_TO_NEXT || c == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
+            override fun isCommandAvailable(command: Int) =
+                if (nextCommand(command)) upcoming != null else super.isCommandAvailable(command)
+            override fun getAvailableCommands(): Player.Commands {
+                val b = super.getAvailableCommands().buildUpon()
+                if (upcoming != null) b.addAll(Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                else b.removeAll(Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                return b.build()
+            }
+            override fun hasNextMediaItem() = upcoming != null
+            override fun seekToNext() { if (upcoming != null) { nextDecision = "now"; hideNext(); playNext() } }
+            override fun seekToNextMediaItem() = seekToNext()
+        }
+    }
+
+    /** The controls read the commands when a player is attached; re-attach so ⏭ lights up once the next episode is known. */
+    private fun refreshButtons() {
+        playerView.player = null
+        playerView.player = controls
+    }
+
+    private lateinit var pauseBox: LinearLayout
+    private lateinit var pauseShow: TextView
+    private lateinit var pauseEpisode: TextView
+    private lateinit var pauseOverview: TextView
+    private val showPauseInfo = Runnable {
+        if (player.isPlaying || seekTarget != null || nextCard.visibility == View.VISIBLE) return@Runnable
+        playerView.hideController()
+        pauseBox.visibility = View.VISIBLE
+        pauseBox.animate().alpha(1f).setDuration(400).start()
+    }
+
+    private fun hidePauseInfo() {
+        root.removeCallbacks(showPauseInfo)
+        pauseBox.animate().cancel()
+        pauseBox.alpha = 0f
+        pauseBox.visibility = View.GONE
+    }
+
+    private fun showPauseTexts(r: PlayRequest) {
+        val parts = r.title.split(" · ")
+        pauseShow.text = parts.first()
+        pauseEpisode.text = parts.drop(1).joinToString(" · ")
+        pauseEpisode.visibility = if (parts.size > 1) View.VISIBLE else View.GONE
+        pauseOverview.text = r.overview.orEmpty()
+        pauseOverview.visibility = if (r.overview.isNullOrBlank()) View.GONE else View.VISIBLE
+    }
+
     private var path = ""
     private var title = ""
     private var watcher: Job? = null
@@ -108,8 +161,15 @@ class PlayerActivity : ComponentActivity() {
         // Hebrew subtitles and audio first when a file has them
         player.trackSelectionParameters = TrackSelectionParameters.Builder(this)
             .setPreferredTextLanguages("he", "iw").setPreferredAudioLanguages("he", "iw", "en").build()
-        playerView.player = player
+        playerView.player = controls
         player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Netflix-style: a few seconds after pausing, show what this is and its summary
+                root.removeCallbacks(showPauseInfo)
+                if (isPlaying) hidePauseInfo()
+                else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) root.postDelayed(showPauseInfo, PAUSE_INFO_AFTER_MS)
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED) onEnded()
             }
@@ -118,18 +178,28 @@ class PlayerActivity : ComponentActivity() {
                 Toast.makeText(this@PlayerActivity, "לא הצלחתי לנגן: ${error.errorCodeName}", Toast.LENGTH_LONG).show()
             }
         })
-        open(intent.getStringExtra("path") ?: "", intent.getStringExtra("title") ?: "", intent.getDoubleExtra("start", 0.0))
+        open(requestOf(intent) ?: PlayRequest("", ""))
+    }
+
+    private fun requestOf(i: Intent): PlayRequest? {
+        val p = i.getStringExtra("path") ?: return null
+        return PlayRequest(p, i.getStringExtra("title") ?: "", i.getDoubleExtra("start", 0.0),
+            i.getStringExtra("kind"), i.getStringExtra("key"), i.getStringExtra("overview"))
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         reportNow()
-        open(intent.getStringExtra("path") ?: return, intent.getStringExtra("title") ?: "", intent.getDoubleExtra("start", 0.0))
+        open(requestOf(intent) ?: return)
     }
 
-    private fun open(newPath: String, newTitle: String, start: Double) {
-        path = newPath
+    private fun open(request: PlayRequest) {
+        val newTitle = request.title
+        val start = request.start
+        path = request.path
         title = newTitle
+        hidePauseInfo()
+        showPauseTexts(request)
         // "Show · עונה 1 פרק 2 · Name": the show big, the rest under it
         val parts = newTitle.split(" · ")
         titleMain.text = parts.first()
@@ -152,6 +222,19 @@ class PlayerActivity : ComponentActivity() {
                 outro = found.outro
             }
             upcoming = runCatching { Api.next(path) }.getOrNull()
+            refreshButtons()
+            // the summary for the pause screen, when the caller didn't pass it
+            if (request.overview.isNullOrBlank() && !request.key.isNullOrBlank()) {
+                val p = path
+                val found = when (request.kind) {
+                    "show", "tv" -> runCatching { Api.show(request.key) }.getOrNull()?.seasons?.flatMap { it.episodes }
+                        ?.firstOrNull { e -> e.files.any { it.path == p } }?.overview
+                    "movie" -> runCatching { Api.movies(q = request.title.substringBefore(" · "), size = 20).items }.getOrNull()
+                        ?.firstOrNull { it.key == request.key }?.overview
+                    else -> null
+                }
+                if (p == path && !found.isNullOrBlank()) { pauseOverview.text = found; pauseOverview.visibility = View.VISIBLE }
+            }
         }
         watcher?.cancel()
         watcher = lifecycleScope.launch {
@@ -250,7 +333,7 @@ class PlayerActivity : ComponentActivity() {
         val next = upcoming ?: return
         reportNow()
         val label = "${next.show} · עונה ${next.season} פרק ${next.episode}" + (if (next.name.isNotBlank()) " · ${next.name}" else "")
-        open(next.path, label, 0.0)
+        open(PlayRequest(next.path, label, 0.0, kind = "show", key = next.key.ifBlank { null }))
     }
 
     private fun onEnded() {
@@ -260,6 +343,17 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (pauseBox.visibility == View.VISIBLE) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                hidePauseInfo()
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> player.play()
+                    KeyEvent.KEYCODE_BACK -> {}
+                    else -> { playerView.showController(); root.postDelayed(showPauseInfo, PAUSE_INFO_AFTER_MS * 2) }
+                }
+            }
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
             if (nextCard.visibility == View.VISIBLE) {
                 nextDecision = "cancel"; hideNext(); return true
@@ -418,6 +512,25 @@ class PlayerActivity : ComponentActivity() {
         titleBox.addView(titleMain, LinearLayout.LayoutParams(-1, -2))
         titleBox.addView(titleSub, LinearLayout.LayoutParams(-1, -2))
         root.addView(titleBox, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+
+        // Paused for a while: "אתם צופים ב" with the title and its summary, over the dimmed picture (like Netflix)
+        pauseBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            setPadding(s(760), s(80), s(120), s(80))
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.RIGHT_LEFT,
+                intArrayOf(0xE6000000.toInt(), 0x99000000.toInt(), 0x33000000))
+            visibility = View.GONE; alpha = 0f
+        }
+        pauseBox.addView(label(30, 0xFFB7BFCC.toInt()).apply { text = "אתם צופים ב" }, LinearLayout.LayoutParams(-1, -2))
+        pauseShow = label(72, Color.WHITE, true).apply { maxLines = 2 }
+        pauseBox.addView(pauseShow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = s(6) })
+        pauseEpisode = label(34, Color.WHITE, true).apply { maxLines = 2 }
+        pauseBox.addView(pauseEpisode, LinearLayout.LayoutParams(-1, -2).apply { topMargin = s(14) })
+        pauseOverview = label(30, 0xFFD5D9E2.toInt()).apply { maxLines = 6; setLineSpacing(s(8).toFloat(), 1f) }
+        pauseBox.addView(pauseOverview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = s(22) })
+        pauseBox.addView(label(24, 0xFF7D8696.toInt()).apply { text = "לחצו OK כדי להמשיך" }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = s(34) })
+        root.addView(pauseBox, FrameLayout.LayoutParams(-1, -1))
 
         // Seek preview: bottom of the screen, while stepping with left/right
         seekPreview = SeekPreview(this).apply { visibility = View.GONE }

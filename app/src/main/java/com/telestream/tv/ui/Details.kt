@@ -128,7 +128,7 @@ fun MovieDetails(nav: Nav, movie: Movie) {
     val playFocus = remember { FocusRequester() }
     fun play(start: Double) {
         if (movie.files.size > 1) choose = start
-        else movie.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, movie.title, start)) }
+        else movie.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, movie.title, start, "movie", movie.key, movie.overview)) }
     }
     Box(Modifier.fillMaxSize()) {
         Backdrop(movie.fanart ?: movie.poster)
@@ -178,7 +178,7 @@ fun MovieDetails(nav: Nav, movie: Movie) {
     }
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
     choose?.let { start ->
-        FileChooser(movie.files, onPick = { f -> choose = null; nav.play(PlayRequest(f.path, movie.title, start)) }, onDismiss = { choose = null })
+        FileChooser(movie.files, onPick = { f -> choose = null; nav.play(PlayRequest(f.path, movie.title, start, "movie", movie.key, movie.overview)) }, onDismiss = { choose = null })
     }
 }
 
@@ -200,7 +200,7 @@ fun ShowScreen(nav: Nav, key: String) {
         fun play(e: Episode, start: Double) {
             val label = "${show.title} · עונה ${season?.number} פרק ${e.number}" + if (e.name.isNotBlank()) " · ${e.name}" else ""
             FocusMemory.last["show:$key"] = "e:${season?.number}:${e.number}"
-            if (e.files.size > 1) choose = e to start else e.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, label, start)) }
+            if (e.files.size > 1) choose = e to start else e.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, label, start, "show", key, e.overview)) }
         }
         // The episode to continue from: the first started-but-unfinished, else the first unwatched
         val resume = season?.episodes?.firstOrNull { it.progress?.let { p -> !p.done && p.position > 30 } == true }
@@ -273,7 +273,7 @@ fun ShowScreen(nav: Nav, key: String) {
         choose?.let { (e, start) ->
             FileChooser(e.files, onPick = { f ->
                 choose = null
-                nav.play(PlayRequest(f.path, "${show.title} · עונה ${season?.number} פרק ${e.number}", start))
+                nav.play(PlayRequest(f.path, "${show.title} · עונה ${season?.number} פרק ${e.number}" + (if (e.name.isNotBlank()) " · ${e.name}" else ""), start, "show", key, e.overview))
             }, onDismiss = { choose = null })
         }
     }

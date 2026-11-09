@@ -105,7 +105,7 @@ fun HomeTab(nav: Nav) {
                             FocusMemory.last["home"] = "c:" + c.path
                             // like the web page: the next episode from the start, otherwise a few seconds back
                             val start = if (c.upNext) 0.0 else (c.position - 5).coerceAtLeast(0.0)
-                            nav.play(PlayRequest(c.path, if (c.label.isBlank()) c.title else "${c.title} · ${c.label}", start))
+                            nav.play(PlayRequest(c.path, if (c.label.isBlank()) c.title else "${c.title} · ${c.label}", start, c.kind, c.key))
                         }
                     }
                 }
@@ -165,7 +165,7 @@ fun HeroBanner(nav: Nav, picks: List<Movie>, onFocused: () -> Unit = {}) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = {
                     val p = movie.progress?.takeIf { !it.done }?.position ?: 0.0
-                    movie.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, movie.title, p)) }
+                    movie.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, movie.title, p, "movie", movie.key, movie.overview)) }
                 }, modifier = Modifier.restoreFocus("home", "hero")) { Text("▶  נגן") }
                 OutlinedButton(onClick = {
                     FocusMemory.last["home"] = "hero"
