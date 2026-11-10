@@ -32,20 +32,31 @@ object Api {
 
     fun streamUrl(path: String) = server + path
 
-    private suspend fun get(path: String, params: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) {
+    /**
+     * The TeleStream server speaks plain http. An address typed as https:// (common with Tailscale IPs) fails with
+     * "Unable to parse TLS packet header"; when that happens, switch the saved address to http:// and try once more.
+     */
+    private fun <T> healing(call: () -> T): T = try { call() } catch (e: javax.net.ssl.SSLException) {
+        val s = Prefs.server
+        if (!s.startsWith("https://", ignoreCase = true)) throw e
+        Prefs.server = "http://" + s.substring("https://".length)
+        call()
+    }
+
+    private suspend fun get(path: String, params: Map<String, String?> = emptyMap()): String = withContext(Dispatchers.IO) { healing {
         val builder = (server + path).toHttpUrl().newBuilder()
         params.forEach { (k, v) -> if (!v.isNullOrBlank()) builder.addQueryParameter(k, v) }
         client.newCall(Request.Builder().url(builder.build()).build()).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             resp.body?.string() ?: ""
         }
-    }
+    } }
 
-    private suspend fun send(method: String, path: String, body: JSONObject? = null): Unit = withContext(Dispatchers.IO) {
+    private suspend fun send(method: String, path: String, body: JSONObject? = null): Unit = withContext(Dispatchers.IO) { healing {
         val payload = (body ?: JSONObject()).toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder().url(server + path).method(method, if (method == "DELETE") null else payload).build()
         client.newCall(request).execute().use { resp -> if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}") }
-    }
+    } }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 

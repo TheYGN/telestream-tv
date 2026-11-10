@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.Text
@@ -106,7 +108,10 @@ fun ServerError(message: String, retry: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Text("ודא שהמחשב דלוק ושהטלוויזיה על אותה רשת. ($message)", color = Muted)
         Spacer(Modifier.height(20.dp))
-        Button(onClick = retry, modifier = Modifier.focusRequester(focus)) { Text("נסה שוב") }
+        Button(onClick = retry, modifier = Modifier.focusRequester(focus),
+            colors = ButtonDefaults.colors(focusedContainerColor = Color.White, focusedContentColor = Color.Black)) {
+            Text("נסה שוב", color = LocalContentColor.current, fontWeight = FontWeight.SemiBold)
+        }
     }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 }

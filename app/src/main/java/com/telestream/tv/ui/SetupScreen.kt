@@ -100,6 +100,7 @@ fun SetupScreen(nav: Nav, first: Boolean) {
             status = try {
                 Api.hello()
                 val home = Api.home()
+                server = Prefs.server
                 if (first) nav.replace(AppScreen.Main)
                 "נשמר. השרת עונה: ${home.movies} סרטים, ${home.shows} סדרות."
             } catch (e: Exception) {

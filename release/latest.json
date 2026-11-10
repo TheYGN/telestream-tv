@@ -1,5 +1,5 @@
 {
-  "version": "0.5.2",
-  "notes": "תיקון: כשעוצרים פרק או סרט, התקציר מופיע עכשיו גם כשהניגון התחיל מהטלפון, מ'המשך צפייה' או מפרק הבא. מופיע אחרי 4 שניות.",
+  "version": "0.5.3",
+  "notes": "אם כתובת השרת הוזנה עם https (למשל כתובת Tailscale), האפליקציה מתקנת אותה ל-http לבד ומתחברת. הכיתוב על הכפתור 'נסה שוב' קריא יותר.",
   "apk": "https://raw.githubusercontent.com/TheYGN/telestream-tv/main/release/TeleStreamTV.apk"
 }
