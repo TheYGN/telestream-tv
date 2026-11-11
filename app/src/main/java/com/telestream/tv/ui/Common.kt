@@ -26,6 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -46,20 +49,36 @@ import kotlinx.coroutines.delay
 /** Loading, failed or ready; [reload] tries again. */
 class Loaded<T>(val value: T?, val error: String?, val loading: Boolean, val reload: () -> Unit)
 
-/** Runs [block] once per [key]; a value already in [Cache] shows at once while a fresh one loads. */
+/** Bumped each time the app returns to the front (back from the player), so [load]s marked live fetch again. */
+object Resumed {
+    var tick by mutableIntStateOf(0)
+}
+
+/**
+ * Runs [block] once per [key]; a value already in [Cache] shows at once while a fresh one loads.
+ * [live]: also loads again when the app returns from the player, so what was just watched shows.
+ * [maxAgeMs]: a cached value younger than this is used as it is, without asking the server again.
+ */
 @Composable
-fun <T> load(key: String, block: suspend () -> T): Loaded<T> {
+fun <T> load(key: String, live: Boolean = false, maxAgeMs: Long = 0, block: suspend () -> T): Loaded<T> {
     var attempt by remember(key) { mutableIntStateOf(0) }
     @Suppress("UNCHECKED_CAST")
     var value by remember(key) { mutableStateOf(Cache.values[key] as T?) }
     var error by remember(key) { mutableStateOf<String?>(null) }
     var loading by remember(key) { mutableStateOf(true) }
-    LaunchedEffect(key, attempt) {
+    val tick = if (live) Resumed.tick else 0
+    val firstTick = remember(key) { tick }
+    LaunchedEffect(key, attempt, tick) {
+        val at = Cache.at[key]
+        if (attempt == 0 && tick == firstTick && value != null && at != null &&
+            android.os.SystemClock.elapsedRealtime() - at < maxAgeMs) { loading = false; return@LaunchedEffect }
+        if (tick != firstTick) delay(700) // let the player's last position reach the server first
         loading = true
         error = null
         try {
             val fresh = block()
             Cache.values[key] = fresh
+            Cache.at[key] = android.os.SystemClock.elapsedRealtime()
             value = fresh
         } catch (e: Exception) {
             error = e.message ?: e.javaClass.simpleName
@@ -71,24 +90,58 @@ fun <T> load(key: String, block: suspend () -> T): Loaded<T> {
 
 object Cache {
     val values = HashMap<String, Any?>()
+    /** When each value was loaded (elapsedRealtime). */
+    val at = HashMap<String, Long>()
+
+    fun clear() { values.clear(); at.clear(); GridCache.map.clear() }
 }
 
 /** The item last opened on each screen, so Back returns the focus to it. */
 object FocusMemory {
     val last = HashMap<String, String>()
+    /** When Back last closed a screen (elapsedRealtime): only then is the remembered item focused again. */
+    var backAt = 0L
+
+    fun returning() = android.os.SystemClock.elapsedRealtime() - backAt < 4000
 }
 
-/** Focus this item when the screen comes back, if it was the one opened. */
+/**
+ * Focus this item when the screen comes back with Back, if it was the one opened. Once only: the memory is used up,
+ * so the item does not pull the focus to itself again later (when it scrolls back into view, on a tab change…).
+ */
 @Composable
 fun Modifier.restoreFocus(screen: String, id: String): Modifier {
-    if (FocusMemory.last[screen] != id) return this
+    if (FocusMemory.last[screen] != id || !FocusMemory.returning()) return this
     val requester = remember { FocusRequester() }
+    var got by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(80)
-        runCatching { requester.requestFocus() }
+        // a slow TV may not be ready to take the focus on the first try (the player is still closing): try a few times
+        for (wait in longArrayOf(80, 250, 500)) {
+            delay(wait)
+            if (got || FocusMemory.last[screen] != id) break
+            runCatching { requester.requestFocus() }
+        }
+        if (FocusMemory.last[screen] == id) FocusMemory.last.remove(screen)
     }
-    return this.focusRequester(requester)
+    return this.focusRequester(requester).onFocusChanged { if (it.isFocused) got = true }
 }
+
+/**
+ * Left/right stay inside this row (or grid): at its end the focus stops, instead of jumping to whatever happens to be
+ * up or down in that direction (a tab, a chip, another row). Up/down leave it as usual.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+fun Modifier.keepSideways(): Modifier = this.focusProperties {
+    exit = {
+        if (it == androidx.compose.ui.focus.FocusDirection.Left || it == androidx.compose.ui.focus.FocusDirection.Right) FocusRequester.Cancel
+        else FocusRequester.Default
+    }
+}.focusGroup()
+
+/** A clear white frame around the card in focus, so it is always obvious where the remote is. */
+@Composable
+fun cardBorder() = CardDefaults.border(
+    focusedBorder = androidx.tv.material3.Border(androidx.compose.foundation.BorderStroke(3.dp, Color.White), shape = RoundedCornerShape(10.dp)))
 
 @Composable
 fun <T> Loading(state: Loaded<T>, content: @Composable (T) -> Unit) {
@@ -137,7 +190,7 @@ fun PosterCard(
 ) {
     Column(Modifier.width(124.dp)) {
         Card(onClick = onClick, modifier = modifier.size(124.dp, 186.dp),
-            shape = CardDefaults.shape(RoundedCornerShape(10.dp))) {
+            shape = CardDefaults.shape(RoundedCornerShape(10.dp)), border = cardBorder()) {
             Box(Modifier.fillMaxSize().background(Panel)) {
                 if (poster != null) {
                     AsyncImage(model = poster, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -164,7 +217,7 @@ fun WideCard(
     modifier: Modifier = Modifier, onClick: () -> Unit,
 ) {
     Column(Modifier.width(224.dp)) {
-        Card(onClick = onClick, modifier = modifier.size(224.dp, 126.dp), shape = CardDefaults.shape(RoundedCornerShape(10.dp))) {
+        Card(onClick = onClick, modifier = modifier.size(224.dp, 126.dp), shape = CardDefaults.shape(RoundedCornerShape(10.dp)), border = cardBorder()) {
             Box(Modifier.fillMaxSize().background(Panel)) {
                 if (image != null) AsyncImage(model = image, contentDescription = title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 if (tag.isNotBlank()) Text(tag, fontSize = 12.sp, color = Color.Black, modifier = Modifier.align(Alignment.TopStart)
@@ -179,8 +232,12 @@ fun WideCard(
 }
 
 @Composable
-fun <T> CardRow(items: List<T>, key: (T) -> String, card: @Composable (T) -> Unit) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+fun <T> CardRow(
+    items: List<T>, key: (T) -> String,
+    state: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    card: @Composable (T) -> Unit,
+) {
+    LazyRow(state = state, modifier = Modifier.keepSideways(), contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(items, key = key) { card(it) }
     }
 }

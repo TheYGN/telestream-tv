@@ -57,7 +57,7 @@ private fun UpcomingDetails(u: Upcoming) {
                             }
                         }
                         Spacer(Modifier.height(18.dp))
-                        TrailerButton(u.kind, u.tmdbId)
+                        TrailerButton(u.kind, u.tmdbId, autoFocus = true)
                     }
                 }
             }

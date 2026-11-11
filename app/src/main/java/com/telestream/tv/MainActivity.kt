@@ -44,7 +44,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             TeleStreamTheme {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    BackHandler(enabled = stack.size > 1) { stack.removeAt(stack.lastIndex) }
+                    BackHandler(enabled = stack.size > 1) {
+                        com.telestream.tv.ui.FocusMemory.backAt = android.os.SystemClock.elapsedRealtime()
+                        stack.removeAt(stack.lastIndex)
+                    }
                     Box(Modifier.fillMaxSize()) {
                         // the home screen is composed (and loads) from the start; it is hidden while the intro covers it,
                         // then eases in from slightly larger as the camera flies through the logo
@@ -56,7 +59,7 @@ class MainActivity : ComponentActivity() {
                                 scaleX = s; scaleY = s
                             }
                         }) {
-                            Root(stack.last(), open = { stack += it }, replace = { stack.clear(); stack += it })
+                            Root(stack.last(), open = { stack += it }, replace = { stack.clear(); stack += it }, alive = stack.map { it.toString() })
                         }
                         if (!intro.done) IntroOverlay(intro) { }
                     }
@@ -65,6 +68,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         lifecycleScope.launch { UpdateOffer.checkOnStart() }
+    }
+
+    /** Back from the player (or from the TV's home screen): what was watched meanwhile should show. */
+    override fun onRestart() {
+        super.onRestart()
+        com.telestream.tv.ui.Resumed.tick++
     }
 
     /** Any remote button during the intro skips straight to its ending instead of reaching the home screen. */

@@ -94,7 +94,7 @@ fun SetupScreen(nav: Nav, first: Boolean) {
         Prefs.nextLead = lead
         Prefs.skipMode = skipMode
         Prefs.introMode = introMode
-        Cache.values.clear()
+        Cache.clear()
         status = "בודק חיבור לשרת…"
         scope.launch {
             status = try {
@@ -118,26 +118,32 @@ fun SetupScreen(nav: Nav, first: Boolean) {
         Field("איך לקרוא לטלוויזיה הזאת? (למשל: סלון, חדר שינה)", name, { name = it }, modifier = Modifier.focusRequester(focus))
         Field("כתובת השרת במחשב", server, { server = it }, ltr = true)
         Text("כמה שניות לפני סוף פרק להציע את הבא", color = Muted, fontSize = 15.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
-            listOf(30, 60, 90, 120).forEach { s -> FilterChip(selected = lead == s, onClick = { lead = s }) { Text("$s") } }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp).keepSideways()) {
+            listOf(30, 60, 90, 120).forEach { s -> FilterChip(selected = lead == s, onClick = { lead = s; if (!first) Prefs.nextLead = s }) { Text("$s") } }
         }
         Spacer(Modifier.height(10.dp))
         Text("דילוג על הפתיח והתקציר", color = Muted, fontSize = 15.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp).keepSideways()) {
             listOf("להציג כפתור", "לדלג אוטומטית", "לא לדלג").forEachIndexed { i, label ->
-                FilterChip(selected = skipMode == i, onClick = { skipMode = i }) { Text(label) }
+                FilterChip(selected = skipMode == i, onClick = { skipMode = i; if (!first) Prefs.skipMode = i }) { Text(label) }
             }
         }
         Spacer(Modifier.height(10.dp))
         Text("אנימציית פתיחה", color = Muted, fontSize = 15.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp).keepSideways()) {
             listOf("עם צליל", "בלי צליל", "כבויה").forEachIndexed { i, label ->
-                FilterChip(selected = introMode == i, onClick = { introMode = i }) { Text(label) }
+                FilterChip(selected = introMode == i, onClick = { introMode = i; if (!first) Prefs.introMode = i }) { Text(label) }
             }
         }
         Spacer(Modifier.height(20.dp))
-        Button(onClick = ::save) { Text(if (first) "התחל" else "שמור") }
-        if (status.isNotBlank()) Text(status, modifier = Modifier.padding(top = 12.dp), fontSize = 16.sp)
+        // the result sits next to the button, so it is on screen while the button has the focus
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Button(onClick = ::save) { Text(if (first) "התחל" else "שמור") }
+            if (status.isNotBlank()) {
+                Spacer(Modifier.width(16.dp))
+                Text(status, modifier = Modifier.weight(1f), fontSize = 16.sp)
+            }
+        }
         if (!first) {
             Spacer(Modifier.height(24.dp))
             Text("עוד", color = Muted, fontSize = 15.sp)

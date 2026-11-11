@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
@@ -21,6 +23,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,65 +33,98 @@ import androidx.tv.material3.Text
 import com.telestream.tv.Api
 
 /** All movies or all shows, newest first, a page at a time; with the genre chips on top in the main tabs. */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun BrowseScreen(nav: Nav, kind: String, initialGenre: String?, showGenres: Boolean, initialSort: String? = null, title: String? = null) {
     var genre by rememberSaveable(kind) { mutableStateOf(initialGenre) }
     var sort by rememberSaveable(kind) { mutableStateOf(initialSort) }
-    val home = load("homeinfo") { Api.home() }
+    val home = load("homeinfo", maxAgeMs = 5 * 60_000L) { Api.home() }
     Column(Modifier.fillMaxSize()) {
         if (showGenres) {
+            // the first time down from the tabs lands on the first chip
+            val firstChip = remember { androidx.compose.ui.focus.FocusRequester() }
             val genres = home.value?.let { if (kind == "movies") it.movieGenres else it.showGenres } ?: emptyList()
-            LazyRow(contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { FilterChip(selected = sort == null && genre == null, onClick = { genre = null; sort = null }) { Text("הכי חדשים") } }
+            // coming back up from the posters returns to the chip you were on, not to whichever chip is above the poster
+            Box(Modifier.keepSideways()) {
+            LazyRow(modifier = Modifier.focusRestorer { firstChip }, contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { FilterChip(selected = sort == null && genre == null, onClick = { genre = null; sort = null }, modifier = Modifier.focusRequester(firstChip)) { Text("הכי חדשים") } }
                 item { FilterChip(selected = sort == "rating", onClick = { sort = if (sort == "rating") null else "rating" }) { Text("דירוג") } }
                 items(genres) { g -> FilterChip(selected = genre == g, onClick = { genre = if (genre == g) null else g }) { Text(g) } }
+            }
             }
         } else if (title != null || initialGenre != null) {
             Text(title ?: initialGenre ?: "", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, top = 24.dp, bottom = 8.dp))
         }
-        PagedGrid(nav, kind, genre, sort, q = null, screen = "browse:$kind:$genre:$sort")
+        // a screen of its own (opened with "הכל") starts with the remote on its first poster; under the tabs it starts on the tab
+        PagedGrid(nav, kind, genre, sort, q = null, screen = "browse:$kind:$genre:$sort", autoFocus = !showGenres)
     }
+}
+
+/** What a grid has loaded so far and where it is scrolled to; kept while its screen is away, so Back returns to the same place. */
+class GridData {
+    val items = mutableStateListOf<Any>()
+    var page by mutableStateOf(0)
+    var pages by mutableStateOf(1)
+    val grid = LazyGridState()
+}
+
+object GridCache {
+    val map = HashMap<String, GridData>()
 }
 
 /** A grid of posters that fetches the next page as the focus nears the end. */
 @Composable
-fun PagedGrid(nav: Nav, kind: String, genre: String?, sort: String?, q: String?, screen: String) {
-    val items = remember(screen, q) { mutableStateListOf<Any>() }
-    var page by remember(screen, q) { mutableStateOf(0) }
-    var pages by remember(screen, q) { mutableStateOf(1) }
+fun PagedGrid(nav: Nav, kind: String, genre: String?, sort: String?, q: String?, screen: String, autoFocus: Boolean = false) {
+    val firstCard = remember { androidx.compose.ui.focus.FocusRequester() }
+    val returning = remember { FocusMemory.returning() && FocusMemory.last[screen] != null }
+    val data = remember(screen, q) { GridCache.map.getOrPut("$screen|$q") { GridData() } }
+    val items = data.items
     var loading by remember(screen, q) { mutableStateOf(false) }
     var error by remember(screen, q) { mutableStateOf<String?>(null) }
-    var want by remember(screen, q) { mutableStateOf(1) }
+    var want by remember(screen, q) { mutableStateOf(maxOf(1, data.page)) }
+    var attempt by remember(screen, q) { mutableIntStateOf(0) }
 
-    LaunchedEffect(screen, q, want) {
-        if (page >= want || page >= pages || loading) return@LaunchedEffect
-        loading = true
-        error = null
+    LaunchedEffect(screen, q, want, attempt) {
         try {
-            val next = page + 1
-            val result = if (kind == "movies") Api.movies(next, genre, q, sort = sort).let { it.items to it.pages }
-            else Api.shows(next, genre, q, sort = sort).let { it.items to it.pages }
-            items.addAll(result.first)
-            pages = result.second
-            page = next
-        } catch (e: Exception) {
-            error = e.message ?: "error"
+            while (data.page < want && data.page < data.pages) {
+                loading = true
+                error = null
+                try {
+                    val next = data.page + 1
+                    val result = if (kind == "movies") Api.movies(next, genre, q, sort = sort).let { it.items to it.pages }
+                    else Api.shows(next, genre, q, sort = sort).let { it.items to it.pages }
+                    items.addAll(result.first)
+                    data.pages = result.second
+                    data.page = next
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    error = e.message ?: "error"
+                    if (items.isEmpty()) break          // first page: the error screen with its button
+                    kotlinx.coroutines.delay(3000)      // a later page: try again quietly
+                }
+            }
+        } finally {
+            loading = false
         }
-        loading = false
     }
 
     when {
-        items.isEmpty() && error != null -> ServerError(error!!) { want = page + 1; error = null }
-        items.isEmpty() && (loading || page == 0) -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("טוען…", color = Muted) }
+        items.isEmpty() && error != null -> ServerError(error!!) { error = null; attempt++ }
+        items.isEmpty() && (loading || data.page == 0) -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("טוען…", color = Muted) }
         items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("לא נמצא כלום", color = Muted, fontSize = 20.sp) }
         else -> LazyVerticalGrid(
+            state = data.grid, modifier = Modifier.keepSideways(),
             columns = GridCells.Adaptive(124.dp),
             contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 12.dp, bottom = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             itemsIndexed(items, key = { i, it -> (if (it is com.telestream.tv.Movie) "m:" + it.key else "s:" + (it as com.telestream.tv.Show).key) + "#" + i }) { index, item ->
-                if (index >= items.size - 12 && page < pages) LaunchedEffect(page) { want = page + 1 }
-                TitleCard(nav, screen, item)
+                if (index >= items.size - 12 && data.page < data.pages) LaunchedEffect(data.page) { want = data.page + 1 }
+                if (index == 0 && autoFocus) {
+                    Box(Modifier.focusRequester(firstCard)) { TitleCard(nav, screen, item) }
+                    if (!returning) LaunchedEffect(Unit) { runCatching { firstCard.requestFocus() } }
+                } else TitleCard(nav, screen, item)
             }
         }
     }

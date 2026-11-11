@@ -103,7 +103,7 @@ fun FileChooser(files: List<MediaFile>, onPick: (MediaFile) -> Unit, onDismiss: 
 fun MovieScreen(nav: Nav, key: String, title: String) {
     // There is no single-movie address on the server: search by the title and pick the same key,
     // which also brings this TV's latest progress in it
-    val state = load("movie:$key") {
+    val state = load("movie:$key", live = true) {
         Api.movies(q = title, size = 100).items.firstOrNull { it.key == key } ?: cachedMovie(key) ?: throw IllegalStateException("not found")
     }
     Loading(state) { movie -> MovieDetails(nav, movie) }
@@ -121,9 +121,14 @@ private fun cachedMovie(key: String): Movie? {
 fun MovieDetails(nav: Nav, movie: Movie) {
     val scope = rememberCoroutineScope()
     var choose by remember { mutableStateOf<Double?>(null) }
-    var inList by remember { mutableStateOf<Boolean?>(null) }
+    // the last known answer shows at once, so the button doesn't pop in late and push the others aside
+    val listKey = "inlist:movie:" + movie.key
+    var inList by remember {
+        mutableStateOf(Cache.values[listKey] as? Boolean
+            ?: (Cache.values["home"] as? HomeData)?.myList?.any { it is Movie && it.key == movie.key })
+    }
     LaunchedEffect(movie.key) {
-        inList = runCatching { Api.myList().any { it is Movie && it.key == movie.key } }.getOrNull()
+        runCatching { Api.myList().any { it is Movie && it.key == movie.key } }.getOrNull()?.let { inList = it; Cache.values[listKey] = it }
     }
     val playFocus = remember { FocusRequester() }
     fun play(start: Double) {
@@ -149,7 +154,7 @@ fun MovieDetails(nav: Nav, movie: Movie) {
                 Spacer(Modifier.height(14.dp))
                 Text(movie.overview, fontSize = 17.sp, maxLines = 6, overflow = TextOverflow.Ellipsis, lineHeight = 24.sp)
                 Spacer(Modifier.height(24.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.keepSideways()) {
                     val p = movie.progress
                     if (p != null && !p.done && p.position > 30) {
                         Button(onClick = { play(p.position) }, modifier = Modifier.focusRequester(playFocus)) { Text("▶  המשך מ-${minutes(p.position)}") }
@@ -163,6 +168,7 @@ fun MovieDetails(nav: Nav, movie: Movie) {
                                 runCatching {
                                     if (inList == true) Api.removeFromList("movie", movie.key) else Api.addToList("movie", movie.key)
                                     inList = !inList!!
+                                    Cache.values[listKey] = inList
                                 }
                             }
                         }) { Text(if (inList == true) "✓ ברשימה שלי" else "+ הרשימה שלי") }
@@ -176,7 +182,9 @@ fun MovieDetails(nav: Nav, movie: Movie) {
        item { CastRow("movie", movie.tmdbId) }
       }
     }
-    LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
+    // on entry, and again when the play button is replaced by "continue" after watching (the old one had the focus)
+    val resumable = movie.progress?.let { !it.done && it.position > 30 } == true
+    LaunchedEffect(resumable) { runCatching { playFocus.requestFocus() } }
     choose?.let { start ->
         FileChooser(movie.files, onPick = { f -> choose = null; nav.play(PlayRequest(f.path, movie.title, start, "movie", movie.key, movie.overview)) }, onDismiss = { choose = null })
     }
@@ -184,29 +192,45 @@ fun MovieDetails(nav: Nav, movie: Movie) {
 
 @Composable
 fun ShowScreen(nav: Nav, key: String) {
-    val state = load("show:$key") { Api.show(key) }
+    val state = load("show:$key", live = true) { Api.show(key) }
     Loading(state) { detail ->
         val show = detail.show
         val seasons = detail.seasons
-        // Start on the season this TV is in the middle of: the last one with anything watched
-        val startSeason = seasons.lastOrNull { s -> s.episodes.any { it.progress != null } }?.number ?: seasons.firstOrNull()?.number ?: 1
-        var seasonNumber by rememberSaveable(key) { mutableStateOf(startSeason) }
+        // The episode to watch next: the furthest one this TV has touched, or the one after it when that is finished
+        // (also across seasons, so a finished season opens on the next one).
+        val all = seasons.flatMap { s -> s.episodes.map { s to it } }
+        val last = all.indexOfLast { it.second.progress != null }
+        val nextUp = when {
+            last < 0 -> all.firstOrNull()
+            all[last].second.progress?.done == true -> all.getOrNull(last + 1) ?: all[last]
+            else -> all[last]
+        }
+        val startSeason = nextUp?.first?.number ?: seasons.firstOrNull()?.number ?: 1
+        var seasonNumber by remember(key) { mutableStateOf(startSeason) }
         var choose by remember { mutableStateOf<Pair<Episode, Double>?>(null) }
         val season = seasons.firstOrNull { it.number == seasonNumber } ?: seasons.firstOrNull()
         val scope = rememberCoroutineScope()
-        var inList by remember { mutableStateOf<Boolean?>(null) }
-        LaunchedEffect(key) { inList = runCatching { Api.myList().any { it is Show && it.key == key } }.getOrNull() }
+        val listKey = "inlist:show:$key"
+        var inList by remember {
+            mutableStateOf(Cache.values[listKey] as? Boolean
+                ?: (Cache.values["home"] as? HomeData)?.myList?.any { it is Show && it.key == key })
+        }
+        LaunchedEffect(key) {
+            runCatching { Api.myList().any { it is Show && it.key == key } }.getOrNull()?.let { inList = it; Cache.values[listKey] = it }
+        }
 
         fun play(e: Episode, start: Double) {
             val label = "${show.title} · עונה ${season?.number} פרק ${e.number}" + if (e.name.isNotBlank()) " · ${e.name}" else ""
-            FocusMemory.last["show:$key"] = "e:${season?.number}:${e.number}"
             if (e.files.size > 1) choose = e to start else e.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, label, start, "show", key, e.overview)) }
         }
         // The episode to continue from: the first started-but-unfinished, else the first unwatched
-        val resume = season?.episodes?.firstOrNull { it.progress?.let { p -> !p.done && p.position > 30 } == true }
+        val resume = nextUp?.second?.takeIf { e -> season?.episodes?.any { it === e } == true }
+            ?: season?.episodes?.firstOrNull { it.progress?.let { p -> !p.done && p.position > 30 } == true }
             ?: season?.episodes?.firstOrNull { it.progress?.done != true }
+            ?: season?.episodes?.firstOrNull()
         val firstFocus = remember { FocusRequester() }
-        var focusedEpisode by remember { mutableStateOf<Episode?>(null) }
+        // by number, not by object: the list is replaced by a fresh one after watching
+        var focusedEpisode by remember { mutableStateOf<Int?>(null) }
 
         Box(Modifier.fillMaxSize()) {
             Backdrop(show.fanart ?: show.poster)
@@ -218,7 +242,7 @@ fun ShowScreen(nav: Nav, key: String) {
                         Spacer(Modifier.height(10.dp))
                         Text(show.overview, fontSize = 16.sp, maxLines = 4, overflow = TextOverflow.Ellipsis, lineHeight = 22.sp)
                         Spacer(Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.keepSideways()) {
                             if (resume != null) {
                                 val p = resume.progress
                                 val resumeAt = if (p != null && !p.done) p.position else 0.0
@@ -231,6 +255,7 @@ fun ShowScreen(nav: Nav, key: String) {
                                     runCatching {
                                         if (inList == true) Api.removeFromList("show", key) else Api.addToList("show", key)
                                         inList = !inList!!
+                                        Cache.values[listKey] = inList
                                     }
                                 }
                             }) { Text(if (inList == true) "✓ ברשימה שלי" else "+ הרשימה שלי") }
@@ -239,22 +264,25 @@ fun ShowScreen(nav: Nav, key: String) {
                     }
                 }
                 if (seasons.size > 1) item {
-                    LazyRow(contentPadding = PaddingValues(horizontal = 48.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyRow(modifier = Modifier.keepSideways(), contentPadding = PaddingValues(horizontal = 48.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(seasons, key = { it.number }) { s ->
-                            FilterChip(selected = s.number == season?.number, onClick = { seasonNumber = s.number }) { Text("עונה ${s.number}") }
+                            FilterChip(selected = s.number == season?.number, onClick = { seasonNumber = s.number; focusedEpisode = null }) { Text("עונה ${s.number}") }
                         }
                     }
                 } else item { Spacer(Modifier.height(16.dp)) }
                 if (season != null) item {
-                    CardRow(season.episodes, key = { "${season.number}:${it.number}" }) { e ->
+                    // each season's row starts on the episode to watch, not where the previous season's row was left
+                    val rowState = remember(season.number) {
+                        androidx.compose.foundation.lazy.LazyListState(season.episodes.indexOf(resume).coerceAtLeast(0))
+                    }
+                    CardRow(season.episodes, key = { "${season.number}:${it.number}" }, state = rowState) { e ->
                         WideCard(
                             title = "${e.number}. " + e.name.ifBlank { "פרק ${e.number}" },
                             subtitle = hebrewDate(e.aired) ?: e.overview,
                             image = e.still ?: season.poster ?: show.fanart,
                             progress = e.progress?.takeIf { !it.done }?.fraction ?: 0f,
                             tag = if (e.progress?.done == true) "✓ נצפה" else "",
-                            modifier = Modifier.restoreFocus("show:$key", "e:${season.number}:${e.number}")
-                                .onFocusChanged { if (it.isFocused) focusedEpisode = e },
+                            modifier = Modifier.onFocusChanged { if (it.isFocused) focusedEpisode = e.number },
                         ) {
                             val p = e.progress
                             play(e, if (p != null && !p.done) p.position else 0.0)
@@ -263,13 +291,15 @@ fun ShowScreen(nav: Nav, key: String) {
                 }
                 // the episode in focus: its name, when it first aired, length and full summary
                 if (season != null) item {
-                    val e = focusedEpisode?.takeIf { f -> season.episodes.any { it === f } } ?: resume ?: season.episodes.firstOrNull()
+                    val e = season.episodes.firstOrNull { it.number == focusedEpisode } ?: resume ?: season.episodes.firstOrNull()
                     if (e != null) EpisodeInfo(season.number, e)
                 }
                 item { CastRow("tv", show.tmdbId) }
             }
         }
-        LaunchedEffect(Unit) { if (FocusMemory.last["show:$key"] == null) runCatching { firstFocus.requestFocus() } }
+        LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+        // watching ran on into the next season: when the fresh data says so, the page follows
+        LaunchedEffect(startSeason) { if (seasonNumber != startSeason) { seasonNumber = startSeason; focusedEpisode = null } }
         choose?.let { (e, start) ->
             FileChooser(e.files, onPick = { f ->
                 choose = null
@@ -281,23 +311,26 @@ fun ShowScreen(nav: Nav, key: String) {
 
 /** Shown only when the server finds a trailer for this title. */
 @Composable
-fun TrailerButton(kind: String, tmdbId: Int?) {
+fun TrailerButton(kind: String, tmdbId: Int?, autoFocus: Boolean = false) {
     if (tmdbId == null) return
     val context = LocalContext.current
-    val state = load("trailer:$kind:$tmdbId") { Api.trailer(kind, tmdbId) ?: "" }
+    val state = load("trailer:$kind:$tmdbId", maxAgeMs = 60 * 60_000L) { Api.trailer(kind, tmdbId) ?: "" }
     val key = state.value?.ifBlank { null } ?: return
-    OutlinedButton(onClick = { TrailerActivity.open(context, key) }) { Text("🎬  טריילר") }
+    val focus = remember { FocusRequester() }
+    OutlinedButton(onClick = { TrailerActivity.open(context, key) }, modifier = Modifier.focusRequester(focus)) { Text("🎬  טריילר") }
+    // on a page with nothing else to press (a title that hasn't arrived yet), the remote starts here
+    if (autoFocus) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 }
 
 /** The main actors, with their picture and role. */
 @Composable
 fun CastRow(kind: String, tmdbId: Int?) {
     if (tmdbId == null) return
-    val state = load("cast:$kind:$tmdbId") { Api.cast(kind, tmdbId) }
+    val state = load("cast:$kind:$tmdbId", maxAgeMs = 60 * 60_000L) { Api.cast(kind, tmdbId) }
     val cast = state.value?.takeIf { it.isNotEmpty() } ?: return
     Column {
         SectionTitle("שחקנים")
-        LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyRow(modifier = Modifier.keepSideways(), contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             items(cast.size) { i -> ActorCard(cast[i]) }
         }
     }

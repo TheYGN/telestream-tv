@@ -11,7 +11,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class TeleStreamApp : Application() {
+class TeleStreamApp : Application(), coil.ImageLoaderFactory {
+    /** Pictures fade in instead of popping. */
+    override fun newImageLoader(): coil.ImageLoader = coil.ImageLoader.Builder(this).crossfade(200).build()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var listener: Job? = null
     private var started = 0

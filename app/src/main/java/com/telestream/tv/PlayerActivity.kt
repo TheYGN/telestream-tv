@@ -48,6 +48,8 @@ class PlayerActivity : ComponentActivity() {
         private const val REPORT_EVERY_MS = 10_000L
         private const val SKIP_SHOWN_MS = 30_000L
         private const val PAUSE_INFO_AFTER_MS = 4_000L
+        /** Outlives the screen, for the last "where we stopped" report. */
+        private val reports = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
 
         fun start(context: Context, request: PlayRequest) {
             context.startActivity(Intent(context, PlayerActivity::class.java)
@@ -101,11 +103,15 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    /** The controls read the commands when a player is attached; re-attach so ⏭ lights up once the next episode is known. */
+    /**
+     * ⏭ lights up once the next episode is known. This makes the controls read the player's commands again without
+     * detaching the player (which blinked the picture and closed the controls a moment into every video).
+     */
     private fun refreshButtons() {
-        playerView.player = null
-        playerView.player = controls
+        playerView.setShowNextButton(true)
     }
+
+    private var meta: kotlinx.coroutines.Job? = null
 
     private lateinit var pauseBox: LinearLayout
     private lateinit var pauseShow: TextView
@@ -190,7 +196,10 @@ class PlayerActivity : ComponentActivity() {
                 // Netflix-style: a few seconds after pausing, show what this is and its summary
                 root.removeCallbacks(showPauseInfo)
                 if (isPlaying) hidePauseInfo()
-                else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) root.postDelayed(showPauseInfo, PAUSE_INFO_AFTER_MS)
+                else if (!player.playWhenReady && player.playbackState == Player.STATE_READY) {
+                    root.postDelayed(showPauseInfo, PAUSE_INFO_AFTER_MS)
+                    reportNow() // a pause is a likely place to stop: save the exact point
+                }
             }
 
             override fun onPlaybackStateChanged(state: Int) {
@@ -231,6 +240,10 @@ class PlayerActivity : ComponentActivity() {
         skips.clear(); shownSkip = null; outro = null; upcoming = null
         nextDecision = null; nextOffered = false
         hideSkip(); hideNext()
+        // nothing of the previous video carries over: a seek still waiting, its preview, the lit ⏭
+        root.removeCallbacks(applySeek); root.removeCallbacks(hideSeek)
+        seekTarget = null; seekPreview.visibility = View.GONE; seekPreview.frame = null
+        refreshButtons()
         frames.open(Api.streamUrl(path), lifecycleScope)
         val item = MediaItem.Builder().setUri(Uri.parse(Api.streamUrl(path)))
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build()).build()
@@ -238,13 +251,19 @@ class PlayerActivity : ComponentActivity() {
         player.prepare()
         player.playWhenReady = true
         playerView.requestFocus()
-        lifecycleScope.launch {
-            runCatching { Api.skip(path) }.getOrNull()?.let { found ->
+        meta?.cancel()
+        val opened = request.path
+        meta = lifecycleScope.launch {
+            val found = runCatching { Api.skip(opened) }.getOrNull()
+            if (!isActive || opened != path) return@launch // another video was opened meanwhile
+            found?.let {
                 found.recap?.let { if (it.second - it.first >= 5) skips += SkipPart(it.first, it.second, "דלג על התקציר") }
                 found.intro?.let { if (it.second - it.first >= 5) skips += SkipPart(it.first, it.second, "דלג על הפתיח") }
                 outro = found.outro
             }
-            upcoming = runCatching { Api.next(path) }.getOrNull()
+            val next = runCatching { Api.next(opened) }.getOrNull()
+            if (!isActive || opened != path) return@launch
+            upcoming = next
             refreshButtons()
             // the summary for the pause screen, when the caller didn't pass it (continue watching, sent from the phone, next episode)
             if (request.overview.isNullOrBlank()) {
@@ -284,7 +303,8 @@ class PlayerActivity : ComponentActivity() {
     private fun report(position: Double, total: Double) {
         if (path.isBlank() || total <= 0) return
         val p = path
-        lifecycleScope.launch { runCatching { Api.progress(p, position, total) } }
+        // not the screen's own scope: the last report is sent while the player is closing, and must not be cut off with it
+        reports.launch { runCatching { Api.progress(p, position, total) } }
     }
 
     private fun reportNow() {
@@ -377,6 +397,9 @@ class PlayerActivity : ComponentActivity() {
             return true
         }
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (seekTarget != null) { // Back during a seek cancels the seek, it doesn't leave the video
+                root.removeCallbacks(applySeek); seekTarget = null; hideSeek.run(); return true
+            }
             if (nextCard.visibility == View.VISIBLE) {
                 nextDecision = "cancel"; hideNext(); return true
             }
@@ -407,6 +430,16 @@ class PlayerActivity : ComponentActivity() {
                     return true
                 }
             }
+        }
+        // The skip button / next-episode card has the focus: up/down still open the controls and the remote's
+        // play/pause keys still work (they reach the player only when the focus is inside it).
+        if (!playerView.hasFocus()) when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> if (!onCard) {
+                if (event.action == KeyEvent.ACTION_DOWN) { playerView.requestFocus(); playerView.showController() }
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_NEXT ->
+                return playerView.dispatchKeyEvent(event)
         }
         return super.dispatchKeyEvent(event)
     }
@@ -444,13 +477,20 @@ class PlayerActivity : ComponentActivity() {
         if (hadFocus) playerView.requestFocus()
     }
 
+    /** Leaving with Back: save the point now, before the page behind comes back and asks the server where we were. */
+    override fun onPause() {
+        super.onPause()
+        if (isFinishing) { reportNow(); player.pause() }
+    }
+
     override fun onStop() {
         super.onStop()
-        reportNow()
+        if (!isFinishing) reportNow()
         player.pause()
     }
 
     override fun onDestroy() {
+        root.removeCallbacks(applySeek); root.removeCallbacks(hideSeek); root.removeCallbacks(showPauseInfo)
         watcher?.cancel()
         frames.close()
         player.release()

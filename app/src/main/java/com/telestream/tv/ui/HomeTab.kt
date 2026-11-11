@@ -49,7 +49,7 @@ private class Rail(val title: String, val all: AppScreen, val load: suspend () -
 @Composable
 fun HomeTab(nav: Nav) {
     // Loads again each time the home tab shows, so what was just watched moves to the front
-    val state = load("home") {
+    val state = load("home", live = true) {
         coroutineScope {
             val cont = async { runCatching { Api.continueWatching() }.getOrDefault(emptyList()) }
             val list = async { runCatching { Api.myList() }.getOrDefault(emptyList()) }
@@ -67,19 +67,22 @@ fun HomeTab(nav: Nav) {
             data.showGenres.map { g -> Rail("סדרות · $g", AppScreen.Browse("shows", g, title = "סדרות · $g")) { Api.shows(size = 24, genre = g).items } }
         val listState = rememberLazyListState()
         val scope = rememberCoroutineScope()
+        val heroScroll = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 48.dp)) {
             val picks = data.movies.filter { it.fanart != null && it.overview.isNotBlank() }.take(6)
             if (picks.isNotEmpty()) item(key = "hero") {
                 // coming back up to the banner: show all of it, not just its buttons
-                HeroBanner(nav, picks) {
-                    // after the focus has scrolled the buttons into view, go all the way up
-                    scope.launch { delay(120); listState.animateScrollToItem(0) }
+                HeroBanner(nav, picks) { has ->
+                    // after the focus has scrolled the buttons into view, go all the way up;
+                    // not when the focus has already moved on (a quick up-and-down), which would cut the row off
+                    heroScroll[0]?.cancel()
+                    heroScroll[0] = if (has) scope.launch { delay(120); listState.animateScrollToItem(0) } else null
                 }
             }
             val upcoming = soon.value.orEmpty()
             if (upcoming.isNotEmpty()) {
-                item { SectionTitle("בקרוב ברשת") }
-                item {
+                item(key = "t:soon") { SectionTitle("בקרוב ברשת") }
+                item(key = "r:soon") {
                     CardRow(upcoming, key = { it.key }) { u ->
                         PosterCard(title = u.title, poster = u.poster, subtitle = u.whenText,
                             modifier = Modifier.restoreFocus("home", "u:" + u.key)) {
@@ -91,8 +94,8 @@ fun HomeTab(nav: Nav) {
                 }
             }
             if (data.continueItems.isNotEmpty()) {
-                item { SectionTitle("המשך צפייה · ${Prefs.tvName}") }
-                item {
+                item(key = "t:cont") { SectionTitle("המשך צפייה · ${Prefs.tvName}") }
+                item(key = "r:cont") {
                     CardRow(data.continueItems, key = { it.path }) { c ->
                         WideCard(
                             title = c.title,
@@ -111,15 +114,15 @@ fun HomeTab(nav: Nav) {
                 }
             }
             if (data.myList.isNotEmpty()) {
-                item { SectionTitle("הרשימה שלי") }
-                item { MixedRow(nav, "home", data.myList) }
+                item(key = "t:list") { SectionTitle("הרשימה שלי") }
+                item(key = "r:list") { MixedRow(nav, "home", data.myList, row = "list") }
             }
-            item { SectionTitle("נוספו לאחרונה · סרטים") }
-            item { MixedRow(nav, "home", data.movies, all = AppScreen.Browse("movies", null, title = "סרטים")) }
-            item { SectionTitle("נוספו לאחרונה · סדרות") }
-            item { MixedRow(nav, "home", data.shows, all = AppScreen.Browse("shows", null, title = "סדרות")) }
-            item { SectionTitle("הסרטים הכי מדורגים") }
-            item { MixedRow(nav, "home", data.topMovies, all = AppScreen.Browse("movies", null, sort = "rating", title = "הסרטים הכי מדורגים")) }
+            item(key = "t:movies") { SectionTitle("נוספו לאחרונה · סרטים") }
+            item(key = "r:movies") { MixedRow(nav, "home", data.movies, row = "movies", all = AppScreen.Browse("movies", null, title = "סרטים")) }
+            item(key = "t:shows") { SectionTitle("נוספו לאחרונה · סדרות") }
+            item(key = "r:shows") { MixedRow(nav, "home", data.shows, row = "shows", all = AppScreen.Browse("shows", null, title = "סדרות")) }
+            item(key = "t:top") { SectionTitle("הסרטים הכי מדורגים") }
+            item(key = "r:top") { MixedRow(nav, "home", data.topMovies, row = "top", all = AppScreen.Browse("movies", null, sort = "rating", title = "הסרטים הכי מדורגים")) }
             genreRails.forEach { rail ->
                 item(key = "rail:" + rail.title) { LazyRail(nav, rail) }
             }
@@ -130,24 +133,31 @@ fun HomeTab(nav: Nav) {
 /** A genre row: loads on its own, so a slow or failing row doesn't hold up the others (and hides itself if empty). */
 @Composable
 private fun LazyRail(nav: Nav, rail: Rail) {
-    val state = load("home:rail:" + rail.title) { rail.load() }
+    val state = load("home:rail:" + rail.title, maxAgeMs = 5 * 60_000L) { rail.load() }
     val items = state.value
     Column(Modifier.heightIn(min = if (items == null) 260.dp else 0.dp)) {
         if (items == null || items.isNotEmpty()) SectionTitle(rail.title)
-        if (!items.isNullOrEmpty()) MixedRow(nav, "home", items, all = rail.all)
+        if (!items.isNullOrEmpty()) MixedRow(nav, "home", items, row = "rail:" + rail.title, all = rail.all)
     }
 }
 
 /** The big rotating picture at the top of home: recently added movies, like the web library page. */
 @Composable
-fun HeroBanner(nav: Nav, picks: List<Movie>, onFocused: () -> Unit = {}) {
+fun HeroBanner(nav: Nav, picks: List<Movie>, onFocusChange: (Boolean) -> Unit = {}) {
     var index by rememberSaveable { mutableIntStateOf(0) }
     var focused by remember { mutableStateOf(false) }
     val movie = picks[index % picks.size]
     LaunchedEffect(index, focused) {
         if (!focused) { delay(8000); index = (index + 1) % picks.size }
     }
-    Box(Modifier.fillMaxWidth().height(380.dp).onFocusChanged { if (it.hasFocus && !focused) onFocused(); focused = it.hasFocus }) {
+    // fetch the next picture ahead of time, so the change fades between two pictures and not into an empty frame
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(index) {
+        picks[(index + 1) % picks.size].fanart?.let {
+            coil.Coil.imageLoader(context).enqueue(coil.request.ImageRequest.Builder(context).data(it).build())
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(380.dp).onFocusChanged { if (it.hasFocus != focused) { focused = it.hasFocus; onFocusChange(it.hasFocus) } }) {
         Crossfade(targetState = movie.fanart, animationSpec = tween(900), label = "hero") { img ->
             AsyncImage(model = img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
@@ -162,15 +172,16 @@ fun HeroBanner(nav: Nav, picks: List<Movie>, onFocused: () -> Unit = {}) {
             Spacer(Modifier.height(8.dp))
             Text(movie.overview, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 21.sp, color = Color(0xFFD5D9E2))
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.keepSideways()) {
                 Button(onClick = {
                     val p = movie.progress?.takeIf { !it.done }?.position ?: 0.0
                     movie.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, movie.title, p, "movie", movie.key, movie.overview)) }
-                }, modifier = Modifier.restoreFocus("home", "hero")) { Text("▶  נגן") }
+                }) { Text("▶  נגן") }
                 OutlinedButton(onClick = {
                     FocusMemory.last["home"] = "hero"
+                    Cache.values.getOrPut("movie:" + movie.key) { movie }
                     nav.open(AppScreen.MovieDetails(movie.key, movie.title))
-                }) { Text("פרטים") }
+                }, modifier = Modifier.restoreFocus("home", "hero")) { Text("פרטים") }
                 Spacer(Modifier.width(18.dp))
                 // dots; left/right past the buttons isn't needed — it rotates by itself, and these show where it is
                 picks.indices.forEach { i ->
@@ -184,17 +195,21 @@ fun HeroBanner(nav: Nav, picks: List<Movie>, onFocused: () -> Unit = {}) {
 
 /** A row of movie and show posters; a click opens the title's page. */
 @Composable
-fun MixedRow(nav: Nav, screen: String, items: List<Any>, all: AppScreen? = null) {
+fun MixedRow(nav: Nav, screen: String, items: List<Any>, row: String = "", all: AppScreen? = null) {
     val withAll: List<Any> = if (all != null) items + all else items
     CardRow(withAll, key = { when (it) { is Movie -> "m:" + it.key; is Show -> "s:" + it.key; else -> "all" } }) { item ->
-        if (item is AppScreen) AllCard { nav.open(item) } else TitleCard(nav, screen, item)
+        if (item is AppScreen) AllCard(Modifier.restoreFocus(screen, "$row|all")) {
+            FocusMemory.last[screen] = "$row|all"
+            GridCache.map.clear() // "הכל" opens from the top, with what the server has now
+            nav.open(item)
+        } else TitleCard(nav, screen, item, row)
     }
 }
 
 /** The "הכל ›" card at the end of a row. */
 @Composable
-fun AllCard(onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.size(124.dp, 186.dp), shape = CardDefaults.shape(RoundedCornerShape(10.dp))) {
+fun AllCard(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = modifier.size(124.dp, 186.dp), shape = CardDefaults.shape(RoundedCornerShape(10.dp)), border = cardBorder()) {
         Box(Modifier.fillMaxSize().background(Panel), contentAlignment = Alignment.Center) {
             Text("הכל ›", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
@@ -202,22 +217,25 @@ fun AllCard(onClick: () -> Unit) {
 }
 
 @Composable
-fun TitleCard(nav: Nav, screen: String, item: Any) {
+fun TitleCard(nav: Nav, screen: String, item: Any, row: String = "") {
+    // [row] tells apart the same title shown in two rows of one screen, so Back returns to the row it was opened from
     when (item) {
         is Movie -> PosterCard(
             title = item.title, poster = item.poster, subtitle = listOfNotNull(item.year?.toString(), item.rating?.let { "★ %.1f".format(it) }).joinToString(" · "),
             progress = item.progress?.takeIf { !it.done }?.fraction ?: 0f, watched = item.progress?.done == true,
-            modifier = Modifier.restoreFocus(screen, "m:" + item.key),
+            modifier = Modifier.restoreFocus(screen, "$row|m:" + item.key),
         ) {
-            FocusMemory.last[screen] = "m:" + item.key
+            FocusMemory.last[screen] = "$row|m:" + item.key
+            // the page opens at once with what the card already knows; the fresh copy replaces it when it arrives
+            Cache.values.getOrPut("movie:" + item.key) { item }
             nav.open(AppScreen.MovieDetails(item.key, item.title))
         }
         is Show -> PosterCard(
             title = item.title, poster = item.poster,
             subtitle = listOfNotNull(item.year?.toString(), if (item.seasonCount > 0) "${item.seasonCount} עונות" else null).joinToString(" · "),
-            modifier = Modifier.restoreFocus(screen, "s:" + item.key),
+            modifier = Modifier.restoreFocus(screen, "$row|s:" + item.key),
         ) {
-            FocusMemory.last[screen] = "s:" + item.key
+            FocusMemory.last[screen] = "$row|s:" + item.key
             nav.open(AppScreen.ShowDetails(item.key))
         }
     }
