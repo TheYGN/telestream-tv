@@ -2,6 +2,10 @@ package com.telestream.tv.ui
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -19,6 +23,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -46,6 +53,7 @@ class HomeData(
 /** A row on the home page: its title, what "הכל" opens, and how to load it. */
 private class Rail(val title: String, val all: AppScreen, val load: suspend () -> List<Any>)
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeTab(nav: Nav) {
     // Loads again each time the home tab shows, so what was just watched moves to the front
@@ -68,21 +76,31 @@ fun HomeTab(nav: Nav) {
         val listState = rememberLazyListState()
         val scope = rememberCoroutineScope()
         val heroScroll = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
+        // The stock TV behaviour puts whatever takes the focus 30% down the screen. For the banner's buttons that
+        // cut the banner off, and a second scroll then brought it back: two movements for one key. So the banner
+        // is scrolled to as a whole, in one movement; the rows below keep the stock behaviour.
+        val rowScroll = LocalBringIntoViewSpec.current
+        val pageScroll = remember(rowScroll) { PageScroll(rowScroll) }
+        // inside a row, sideways scrolling stays as it was
+        fun LazyListScope.row(key: String, content: @Composable () -> Unit) = item(key = key) {
+            CompositionLocalProvider(LocalBringIntoViewSpec provides rowScroll, content = content)
+        }
+        CompositionLocalProvider(LocalBringIntoViewSpec provides pageScroll) {
         LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 48.dp)) {
             val picks = data.movies.filter { it.fanart != null && it.overview.isNotBlank() }.take(6)
             if (picks.isNotEmpty()) item(key = "hero") {
                 // coming back up to the banner: show all of it, not just its buttons
                 HeroBanner(nav, picks) { has ->
-                    // after the focus has scrolled the buttons into view, go all the way up;
-                    // not when the focus has already moved on (a quick up-and-down), which would cut the row off
+                    // the banner's buttons don't place themselves (see PageScroll): the whole banner comes into view
+                    pageScroll.banner = has
                     heroScroll[0]?.cancel()
-                    heroScroll[0] = if (has) scope.launch { delay(120); listState.animateScrollToItem(0) } else null
+                    heroScroll[0] = if (has) scope.launch { listState.animateScrollToItem(0) } else null
                 }
             }
             val upcoming = soon.value.orEmpty()
             if (upcoming.isNotEmpty()) {
                 item(key = "t:soon") { SectionTitle("בקרוב ברשת") }
-                item(key = "r:soon") {
+                row("r:soon") {
                     CardRow(upcoming, key = { it.key }) { u ->
                         PosterCard(title = u.title, poster = u.poster, subtitle = u.whenText,
                             modifier = Modifier.restoreFocus("home", "u:" + u.key)) {
@@ -95,7 +113,7 @@ fun HomeTab(nav: Nav) {
             }
             if (data.continueItems.isNotEmpty()) {
                 item(key = "t:cont") { SectionTitle("המשך צפייה · ${Prefs.tvName}") }
-                item(key = "r:cont") {
+                row("r:cont") {
                     CardRow(data.continueItems, key = { it.path }) { c ->
                         WideCard(
                             title = c.title,
@@ -115,19 +133,30 @@ fun HomeTab(nav: Nav) {
             }
             if (data.myList.isNotEmpty()) {
                 item(key = "t:list") { SectionTitle("הרשימה שלי") }
-                item(key = "r:list") { MixedRow(nav, "home", data.myList, row = "list") }
+                row("r:list") { MixedRow(nav, "home", data.myList, row = "list") }
             }
             item(key = "t:movies") { SectionTitle("נוספו לאחרונה · סרטים") }
-            item(key = "r:movies") { MixedRow(nav, "home", data.movies, row = "movies", all = AppScreen.Browse("movies", null, title = "סרטים")) }
+            row("r:movies") { MixedRow(nav, "home", data.movies, row = "movies", all = AppScreen.Browse("movies", null, title = "סרטים")) }
             item(key = "t:shows") { SectionTitle("נוספו לאחרונה · סדרות") }
-            item(key = "r:shows") { MixedRow(nav, "home", data.shows, row = "shows", all = AppScreen.Browse("shows", null, title = "סדרות")) }
+            row("r:shows") { MixedRow(nav, "home", data.shows, row = "shows", all = AppScreen.Browse("shows", null, title = "סדרות")) }
             item(key = "t:top") { SectionTitle("הסרטים הכי מדורגים") }
-            item(key = "r:top") { MixedRow(nav, "home", data.topMovies, row = "top", all = AppScreen.Browse("movies", null, sort = "rating", title = "הסרטים הכי מדורגים")) }
+            row("r:top") { MixedRow(nav, "home", data.topMovies, row = "top", all = AppScreen.Browse("movies", null, sort = "rating", title = "הסרטים הכי מדורגים")) }
             genreRails.forEach { rail ->
-                item(key = "rail:" + rail.title) { LazyRail(nav, rail) }
+                row("rail:" + rail.title) { LazyRail(nav, rail) }
             }
         }
+        }
     }
+}
+
+/** The home page's up-and-down scrolling: as usual, except that the banner's buttons don't place themselves. */
+@OptIn(ExperimentalFoundationApi::class)
+private class PageScroll(val base: BringIntoViewSpec) : BringIntoViewSpec {
+    /** The focus is in the banner, which is scrolled to as a whole. */
+    var banner = false
+    override val scrollAnimationSpec get() = base.scrollAnimationSpec
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
+        if (banner) 0f else base.calculateScrollDistance(offset, size, containerSize)
 }
 
 /** A genre row: loads on its own, so a slow or failing row doesn't hold up the others (and hides itself if empty). */
@@ -142,6 +171,7 @@ private fun LazyRail(nav: Nav, rail: Rail) {
 }
 
 /** The big rotating picture at the top of home: recently added movies, like the web library page. */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun HeroBanner(nav: Nav, picks: List<Movie>, onFocusChange: (Boolean) -> Unit = {}) {
     var index by rememberSaveable { mutableIntStateOf(0) }
@@ -172,8 +202,12 @@ fun HeroBanner(nav: Nav, picks: List<Movie>, onFocusChange: (Boolean) -> Unit = 
             Spacer(Modifier.height(8.dp))
             Text(movie.overview, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 21.sp, color = Color(0xFFD5D9E2))
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.keepSideways()) {
-                Button(onClick = {
+            // from above or from below, the focus comes in on "נגן" (it used to depend on what was straight above or below);
+            // coming back from the title's page it returns to "פרטים", where it left
+            val play = remember { FocusRequester() }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.focusProperties { enter = { if (FocusMemory.returning()) FocusRequester.Default else play } }.keepSideways()) {
+                Button(modifier = Modifier.focusRequester(play), onClick = {
                     val p = movie.progress?.takeIf { !it.done }?.position ?: 0.0
                     movie.files.firstOrNull()?.let { nav.play(PlayRequest(it.path, movie.title, p, "movie", movie.key, movie.overview)) }
                 }) { Text("▶  נגן") }
