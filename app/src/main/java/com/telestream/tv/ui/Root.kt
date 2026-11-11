@@ -1,5 +1,8 @@
 package com.telestream.tv.ui
 
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -141,10 +144,15 @@ fun MainScreen(nav: Nav) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            // which TV this is (its name from the settings), like the web page's "המשך צפייה · סלון"
-            if (com.telestream.tv.Prefs.tvName.isNotBlank()) {
-                Text("📺  " + com.telestream.tv.Prefs.tvName, fontSize = 15.sp, color = Muted,
-                    modifier = Modifier.background(Color(0x1FFFFFFF), RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 6.dp))
+            // the time, and under it which TV this is (its name from the settings), like the web page's "המשך צפייה · סלון".
+            // It may stick out of the bar a little, above and below, so the bar stays as low as it was.
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.wrapContentHeight(unbounded = true).offset(y = (-6).dp)) {
+                Text(clockText(), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFD5D9E2))
+                if (com.telestream.tv.Prefs.tvName.isNotBlank()) {
+                    Spacer(Modifier.height(3.dp))
+                    Text("📺  " + com.telestream.tv.Prefs.tvName, fontSize = 13.sp, color = Muted,
+                        modifier = Modifier.background(Color(0x1FFFFFFF), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 3.dp))
+                }
             }
         }
         Box(Modifier.fillMaxSize()) {

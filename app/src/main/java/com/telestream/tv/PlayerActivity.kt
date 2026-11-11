@@ -122,6 +122,22 @@ class PlayerActivity : ComponentActivity() {
         playerView.hideController()
         pauseBox.visibility = View.VISIBLE
         pauseBox.animate().alpha(1f).setDuration(400).start()
+        syncClock()
+    }
+
+    /** The time of day, top left: only while the controls or the pause screen are up, never over the film itself. */
+    private lateinit var clock: TextView
+    private val tickClock: Runnable = Runnable { syncClock() }
+    private fun syncClock() {
+        root.removeCallbacks(tickClock)
+        val show = playerView.isControllerFullyVisible || pauseBox.visibility == View.VISIBLE
+        clock.animate().cancel()
+        if (show) {
+            clock.text = com.telestream.tv.ui.clockNow()
+            clock.visibility = View.VISIBLE
+            clock.animate().alpha(1f).setDuration(200).start()
+            root.postDelayed(tickClock, 60_000 - System.currentTimeMillis() % 60_000 + 50)
+        } else clock.animate().alpha(0f).setDuration(200).withEndAction { clock.visibility = View.GONE }.start()
     }
 
     private fun hidePauseInfo() {
@@ -129,6 +145,7 @@ class PlayerActivity : ComponentActivity() {
         pauseBox.animate().cancel()
         pauseBox.alpha = 0f
         pauseBox.visibility = View.GONE
+        syncClock()
     }
 
     /**
@@ -490,7 +507,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        root.removeCallbacks(applySeek); root.removeCallbacks(hideSeek); root.removeCallbacks(showPauseInfo)
+        root.removeCallbacks(applySeek); root.removeCallbacks(hideSeek); root.removeCallbacks(showPauseInfo); root.removeCallbacks(tickClock)
         watcher?.cancel()
         frames.close()
         player.release()
@@ -552,6 +569,7 @@ class PlayerActivity : ComponentActivity() {
             titleBox.animate().cancel()
             if (v == View.VISIBLE) { titleBox.visibility = View.VISIBLE; titleBox.animate().alpha(1f).setDuration(200).start() }
             else titleBox.animate().alpha(0f).setDuration(200).withEndAction { titleBox.visibility = View.GONE }.start()
+            syncClock()
             if (v != View.VISIBLE) when {
                 nextCard.visibility == View.VISIBLE -> nextNow.requestFocus()
                 skipButton.visibility == View.VISIBLE -> skipButton.requestFocus()
@@ -593,6 +611,12 @@ class PlayerActivity : ComponentActivity() {
         pauseBox.addView(pauseOverview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = s(22) })
         pauseBox.addView(label(24, 0xFF7D8696.toInt()).apply { text = "לחצו OK כדי להמשיך" }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = s(34) })
         root.addView(pauseBox, FrameLayout.LayoutParams(-1, -1))
+        clock = label(40, 0xFFE6E9EF.toInt(), true).apply {
+            gravity = Gravity.LEFT; textDirection = View.TEXT_DIRECTION_LTR
+            setShadowLayer(s(8).toFloat(), 0f, s(2).toFloat(), 0xCC000000.toInt())
+            visibility = View.GONE; alpha = 0f
+        }
+        root.addView(clock, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.LEFT).apply { leftMargin = s(60); topMargin = s(44) })
 
         // Seek preview: bottom of the screen, while stepping with left/right
         seekPreview = SeekPreview(this).apply { visibility = View.GONE }

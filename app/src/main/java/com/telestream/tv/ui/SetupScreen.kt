@@ -53,8 +53,10 @@ import kotlinx.coroutines.launch
 @Composable
 fun Field(label: String, value: String, onChange: (String) -> Unit, ltr: Boolean = false, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(editing) { if (editing) { kotlinx.coroutines.delay(80); keyboard?.show() } }
     Text(label, color = Muted, fontSize = 15.sp)
     Spacer(Modifier.height(6.dp))
     BasicTextField(
@@ -62,10 +64,17 @@ fun Field(label: String, value: String, onChange: (String) -> Unit, ltr: Boolean
         textStyle = TextStyle(color = Color.White, fontSize = 20.sp, textDirection = if (ltr) TextDirection.Ltr else TextDirection.Content),
         cursorBrush = SolidColor(Accent),
         keyboardOptions = KeyboardOptions(keyboardType = if (ltr) KeyboardType.Uri else KeyboardType.Text),
+        // Moving over the field with the remote does not open the keyboard: until OK is pressed on it, the field is
+        // only something to stand on. OK makes it a text field, and the keyboard comes up.
+        readOnly = !editing,
         modifier = modifier.width(520.dp)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { focused = it.isFocused; if (!it.isFocused) editing = false }
             .onPreviewKeyEvent {
-                leaveOrType(it, keyboard, focusManager)
+                val ok = it.key == androidx.compose.ui.input.key.Key.DirectionCenter || it.key == androidx.compose.ui.input.key.Key.Enter
+                if (ok && !editing) {
+                    if (it.type == androidx.compose.ui.input.key.KeyEventType.KeyDown) editing = true
+                    true
+                } else leaveOrType(it, keyboard, focusManager)
             }
             .background(Panel, RoundedCornerShape(10.dp))
             .border(2.dp, if (focused) Color.White else Color.Transparent, RoundedCornerShape(10.dp))
